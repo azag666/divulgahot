@@ -10,36 +10,46 @@ export default async function handler(req, res) {
   const { phone, originalChatId, originalTitle } = req.body;
 
   const { data } = await supabase.from('telegram_sessions').select('session_string').eq('phone_number', phone).single();
+  
+  if (!data) return res.status(404).json({ error: "Sessão não encontrada" });
+
   const client = new TelegramClient(new StringSession(data.session_string), apiId, apiHash, { connectionRetries: 1, useWSS: false });
 
   try {
     await client.connect();
 
     // 1. Criar o Novo Grupo (Cópia)
-    // Nota: 'createChannel' cria canais ou megagrupos (broadcast=false é grupo)
+    // CORREÇÃO: Adicionado o campo 'about' que é obrigatório na API atual
     const result = await client.invoke(new Api.channels.CreateChannel({
       title: `${originalTitle} (Cópia)`,
-      broadcast: false, // false = Grupo, true = Canal
-      megagroup: true   // Supergrupo (suporta mais gente e histórico)
+      broadcast: false, // false = Grupo
+      megagroup: true,  // true = Supergrupo
+      about: "Cópia de segurança" // <--- O ERRO ESTAVA AQUI (Faltava isso)
     }));
 
-    const newChatId = result.chats[0].id; // ID do novo grupo
-    const accessHash = result.chats[0].accessHash;
+    // Verifica se retornou updates corretamente
+    if (!result.chats || result.chats.length === 0) {
+        throw new Error("Falha ao criar grupo: Resposta vazia do Telegram");
+    }
 
-    // 2. Tentar copiar a foto do original (Se houver)
-    // Isso é complexo pois exige baixar/subir buffer. Vamos pular para manter simples na Vercel.
-    // Em vez disso, focamos no conteúdo.
-
-    // 3. Clonar as últimas 20 mensagens (Mídias, Textos, Links)
-    const messages = await client.getMessages(originalChatId, { limit: 20 });
+    const newChatId = result.chats[0].id; 
     
-    // Inverte para postar na ordem cronológica (da mais antiga para a nova)
-    const msgsToForward = messages.reverse();
+    // 2. Clonar mensagens (Tenta pegar até 30)
+    // Envolvemos em try/catch secundário para que, se falhar a clonagem, o grupo criado não seja perdido
+    try {
+        const messages = await client.getMessages(originalChatId, { limit: 30 });
+        const msgsToForward = messages.reverse(); // Ordem cronológica
 
-    await client.forwardMessages(newChatId, {
-      messages: msgsToForward,
-      fromPeer: originalChatId
-    });
+        if (msgsToForward.length > 0) {
+            await client.forwardMessages(newChatId, {
+              messages: msgsToForward,
+              fromPeer: originalChatId
+            });
+        }
+    } catch (msgError) {
+        console.error("Erro ao encaminhar mensagens:", msgError);
+        // Não trava o processo, apenas avisa no log
+    }
 
     await client.disconnect();
 
@@ -55,6 +65,6 @@ export default async function handler(req, res) {
   } catch (error) {
     await client.disconnect();
     console.error(error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: error.message || "Erro desconhecido ao clonar" });
   }
 }
