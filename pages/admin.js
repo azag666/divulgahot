@@ -42,81 +42,6 @@ export default function AdminPanel() {
   };
 
   // --- FUNÇÃO 1: CAMPANHA AUTOMÁTICA (DISPARO NO BANCO) ---
-  const handleCampaignFire = async () => {
-    if (selectedPhones.size === 0) return alert('Selecione as contas que vão disparar!');
-    
-    // 1. Busca leads pendentes no banco (Limitado a 50 por vez para segurança)
-    const { data: leads } = await supabaseClientHack().from('harvested_leads').select('*').eq('status', 'pending').limit(50);
-    
-    if (!leads || leads.length === 0) return alert('Nenhum lead pendente no banco! Vá na aba Espionagem e roube alguns.');
-
-    setProcessing(true);
-    addLog(`🚀 Iniciando campanha para ${leads.length} leads pendentes...`);
-
-    const phones = Array.from(selectedPhones);
-    let phoneIndex = 0;
-
-    for (const lead of leads) {
-        // Round Robin: Alterna entre as contas selecionadas
-        const sender = phones[phoneIndex % phones.length];
-        phoneIndex++;
-
-        addLog(`Env: ${sender} -> Lead: ${lead.user_id}...`);
-
-        try {
-            const res = await fetch('/api/dispatch', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    senderPhone: sender,
-                    target: lead.user_id, // Usa o ID salvo
-                    message: msg,
-                    leadDbId: lead.id // Importante: Manda o ID do banco para atualizar status
-                })
-            });
-            
-            if (res.ok) addLog(`✅ Sucesso!`);
-            else addLog(`❌ Falha.`);
-
-            // Delay anti-spam
-            await new Promise(r => setTimeout(r, 2000));
-
-        } catch (e) { addLog(`Erro crtico.`); }
-    }
-    
-    setProcessing(false);
-    fetchData(); // Atualiza stats
-    addLog('🏁 Lote finalizado.');
-  };
-
-  // Hack simples para ler o banco no front (apenas para o exemplo do select acima funcionar sem criar outra API)
-  // Em produção, crie uma rota /api/get-pending-leads
-  const supabaseClientHack = () => {
-    // Isso exige que as chaves estejam publicas no .env.local ou NEXT_PUBLIC
-    // Se der erro aqui, você precisa criar a rota API como mencionei.
-    // Para simplificar o código agora, vou assumir que você cria a rota ou usa a lógica de API.
-    // VOU USAR UMA LÓGICA MOCKADA AQUI PARA NÃO QUEBRAR SEU APP:
-    return { from: () => ({ select: () => ({ eq: () => ({ limit: async () => {
-        // Fetch real via API proxy que deveriamos ter criado
-        const r = await fetch('/api/stats'); // Placeholder
-        return { data: [] }; // Retorna vazio se nao implementar a rota
-    }})})})};
-    // **NOTA REAL:** Para isso funcionar 100%, você precisa criar o arquivo pages/api/get-leads.js
-    // Vou deixar o botão chamando um alerta se nao tiver leads.
-  };
-  
-  // CORREÇÃO: Vamos usar uma rota dedicada para pegar os leads, é mais seguro.
-  // Crie o arquivo pages/api/get-campaign-leads.js com: 
-  /*
-    import { createClient } from '@supabase/supabase-js';
-    const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
-    export default async function handler(req, res) {
-        const { data } = await supabase.from('harvested_leads').select('*').eq('status', 'pending').limit(20);
-        res.json({ leads: data });
-    }
-  */
-  // Vou assumir que você criou essa rota para o código abaixo funcionar:
-  
   const startRealCampaign = async () => {
      if (selectedPhones.size === 0) return alert('Selecione contas!');
      
@@ -146,9 +71,7 @@ export default function AdminPanel() {
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
                 senderPhone: sender,
-                target: lead.user_id, // Tenta mandar pelo ID (pode falhar se nao tiver hash)
-                // Se tiver username, é melhor:
-                // target: lead.username || lead.user_id,
+                target: lead.user_id, // Tenta mandar pelo ID
                 message: msg,
                 leadDbId: lead.id
             })
@@ -165,7 +88,7 @@ export default function AdminPanel() {
   // --- FUNÇÕES DE ESPIONAGEM ---
   const loadChats = async (phone) => {
     setSpyPhone(phone);
-    const res = await fetch('/api/spy/list-chats', { method: 'POST', body: JSON.stringify({ phone }), headers: {'Content-Type': 'json'} });
+    const res = await fetch('/api/spy/list-chats', { method: 'POST', body: JSON.stringify({ phone }), headers: {'Content-Type': 'application/json'} });
     const data = await res.json();
     setChats(data.chats || []);
   };
@@ -233,7 +156,7 @@ export default function AdminPanel() {
 
             {tab === 'spy' && (
                 <div style={{ backgroundColor: '#161b22', padding: '20px', borderRadius: '6px' }}>
-                     {!spyPhone ? <p>Selecione uma conta na direita >></p> : (
+                     {!spyPhone ? <p>Selecione uma conta na direita &gt;&gt;</p> : (
                         <div>
                             <h4>Grupos de {spyPhone}</h4>
                             {chats.map(c => (
