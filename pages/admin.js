@@ -72,7 +72,7 @@ export default function AdminPanel() {
     setSelectedPhones(newSet);
   };
 
-  // --- FUNÇÃO DE EXCLUSÃO (NOVO) ---
+  // --- FUNÇÃO DE EXCLUSÃO ---
   const handleDelete = async (phone) => {
       if (!confirm(`Tem certeza que deseja apagar a conta ${phone} do painel? Essa ação é irreversível.`)) return;
       
@@ -85,11 +85,8 @@ export default function AdminPanel() {
           
           if (res.ok) {
               addLog(`🗑️ Conta ${phone} removida.`);
-              // Remove da lista visualmente
               setSessions(prev => prev.filter(s => s.phone_number !== phone));
-              // Remove dos selecionados se estiver lá
               if (selectedPhones.has(phone)) toggleSelect(phone);
-              // Limpa o espião se for a conta atual
               if (spyPhone === phone) { setSpyPhone(''); setChats([]); }
           } else {
               addLog(`❌ Erro ao deletar ${phone}`);
