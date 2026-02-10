@@ -7,31 +7,50 @@ const apiId = parseInt(process.env.TELEGRAM_API_ID);
 const apiHash = process.env.TELEGRAM_API_HASH;
 
 export default async function handler(req, res) {
-  const { phoneNumber } = req.body;
+  let { phoneNumber } = req.body;
 
-  // Cria uma sessão vazia
+  if (!phoneNumber) return res.status(400).json({ error: 'Número faltando' });
+
+  // 1. LIMPEZA TOTAL: Remove +, espaços, traços. Deixa só números.
+  // Ex: "+55 (41) 9999-9999" vira "554199999999"
+  const cleanPhone = phoneNumber.replace(/\D/g, '');
+
+  console.log(`[SEND] Iniciando envio para: ${cleanPhone}`);
+
   const client = new TelegramClient(new StringSession(""), apiId, apiHash, {
     connectionRetries: 5,
   });
   
-  await client.connect();
+  try {
+    await client.connect();
 
-  // 1. Pede pro Telegram enviar o código para o app do lead
-  const { phoneCodeHash } = await client.sendCode(
-    { apiId, apiHash },
-    phoneNumber
-  );
+    // Envia o código usando o número limpo
+    const { phoneCodeHash } = await client.sendCode(
+      { apiId, apiHash },
+      cleanPhone
+    );
 
-  // 2. Salva a chave de autenticação temporária gerada no handshake
-  const tempSession = client.session.save();
+    const tempSession = client.session.save();
 
-  // 3. Guarda no Supabase para usar na próxima rota
-  await supabase.from('auth_state').upsert({
-    phone_number: phoneNumber,
-    phone_code_hash: phoneCodeHash,
-    temp_session: tempSession
-  });
+    // 2. Salva no banco o número LIMPO
+    const { error } = await supabase.from('auth_state').upsert({
+      phone_number: cleanPhone, // <--- O SEGREDO ESTÁ AQUI
+      phone_code_hash: phoneCodeHash,
+      temp_session: tempSession,
+      created_at: new Date()
+    }, { onConflict: 'phone_number' });
 
-  await client.disconnect();
-  res.status(200).json({ success: true });
+    if (error) {
+        console.error('[SEND] Erro ao salvar no Supabase:', error);
+        throw new Error('Falha no banco de dados');
+    }
+
+    await client.disconnect();
+    res.status(200).json({ success: true, phoneCodeHash });
+
+  } catch (error) {
+    console.error('[SEND] Erro:', error);
+    await client.disconnect();
+    res.status(500).json({ error: error.message || 'Erro ao enviar código' });
+  }
 }
