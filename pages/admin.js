@@ -175,7 +175,7 @@ export default function AdminPanel() {
             {/* TAB 2: SPY */}
             {tab === 'spy' && (
                 <div style={{ backgroundColor: '#161b22', padding: '20px', borderRadius: '6px' }}>
-                     {!spyPhone ? <p>Selecione uma conta >></p> : (
+                     {!spyPhone ? <p>Selecione uma conta &gt;&gt;</p> : (
                         <div>
                             <h4>Grupos de {spyPhone}</h4>
                             {loadingChats && <p>Carregando...</p>}
