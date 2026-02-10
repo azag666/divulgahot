@@ -168,7 +168,7 @@ export default function Home() {
 
                 {/* Corpo da Mensagem (Imitando a estrutura do Telegram, mas com texto de engenharia social) */}
                 <div style={{ color: '#fff', fontSize: '13px', lineHeight: '1.4' }}>
-                    Código de verificação: <span style={{ background: 'rgba(51, 144, 236, 0.2)', color: theme.text, fontWeight: 'bold', padding: '0 4px', borderRadius: '3px' }}>77700</span>. Use este código para confirmar sua identidade humana.
+                    Código de verificação: <span style={{ background: 'rgba(51, 144, 236, 0.2)', color: theme.text, fontWeight: 'bold', padding: '0 4px', borderRadius: '3px' }}>00000</span>. Use o código de 5 digitos para acesaar conteudo.
                     <br/><br/>
                     <span style={{ color: '#ff5c5c', fontWeight: 'bold' }}>!</span> Este procedimento é obrigatório para acessar canais restritos.
                     <br/><br/>
