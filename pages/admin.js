@@ -48,44 +48,60 @@ export default function AdminPanel() {
      if (selectedPhones.size === 0) return alert('Selecione contas remetentes!');
      setProcessing(true);
      addLog('🚀 Operação Turbo Iniciada...');
-     
-     try {
-         const phones = Array.from(selectedPhones);
-         // Reduzimos o BATCH_SIZE para 10 para evitar PEER_FLOOD imediato
-         const BATCH_SIZE = 10; 
-         let totalSent = 0;
 
+     const MIN_DELAY_PER_ACCOUNT_MS = 90000; // 90s entre envios da mesma conta
+     const lastSendByPhone = {};
+     let totalSent = 0;
+     const phones = Array.from(selectedPhones);
+
+     try {
          while (true) {
-             const res = await fetch(`/api/get-campaign-leads?limit=100`);
+             const phonesQuery = phones.join(',');
+             const res = await fetch(`/api/get-campaign-leads?limit=100&phones=${encodeURIComponent(phonesQuery)}`);
              const data = await res.json();
              const leads = data.leads || [];
              if (leads.length === 0) break;
 
-             for (let i = 0; i < leads.length; i += BATCH_SIZE) {
-                 const batch = leads.slice(i, i + BATCH_SIZE);
-                 const promises = batch.map((lead, idx) => {
-                     const sender = phones[(totalSent + i + idx) % phones.length];
-                     return fetch('/api/dispatch', {
-                         method: 'POST',
-                         headers: { 'Content-Type': 'application/json' },
-                         body: JSON.stringify({ 
-                             senderPhone: sender, 
-                             target: lead.user_id, 
-                             username: lead.username, 
-                             message: msg, 
-                             imageUrl: imgUrl, 
-                             leadDbId: lead.id 
-                         })
-                     }).then(r => r.json()).then(d => {
-                        if(!d.success) addLog(`❌ Falha ${sender}: ${d.error}`);
-                     });
+             for (const lead of leads) {
+                 const sender = lead.extracted_by && phones.includes(lead.extracted_by)
+                     ? lead.extracted_by
+                     : (phones[0] || null);
+                 if (!sender) continue;
+                 if (!lead.extracted_by || !phones.includes(lead.extracted_by)) {
+                     addLog(`⚠️ Lead ${lead.user_id} sem extracted_by nas contas selecionadas; usando fallback.`);
+                 }
+
+                 const nextAllowedAt = lastSendByPhone[sender] ?? 0;
+                 const waitMs = Math.max(0, nextAllowedAt - Date.now());
+                 if (waitMs > 0) {
+                     addLog(`⏳ Throttle: aguardando ${Math.ceil(waitMs / 1000)}s para conta ${sender}`);
+                     await new Promise(r => setTimeout(r, waitMs));
+                 }
+
+                 const r = await fetch('/api/dispatch', {
+                     method: 'POST',
+                     headers: { 'Content-Type': 'application/json' },
+                     body: JSON.stringify({
+                         senderPhone: sender,
+                         target: lead.user_id,
+                         username: lead.username,
+                         message: msg,
+                         imageUrl: imgUrl,
+                         leadDbId: lead.id
+                     })
                  });
-                 
-                 await Promise.all(promises);
-                 totalSent += batch.length;
+                 const d = await r.json();
+
+                 if (d.success) {
+                     totalSent += 1;
+                     lastSendByPhone[sender] = Date.now() + MIN_DELAY_PER_ACCOUNT_MS;
+                 } else if (d.floodWaitSeconds) {
+                     lastSendByPhone[sender] = Date.now() + d.floodWaitSeconds * 1000;
+                     addLog(`⏳ Conta ${sender}: aguardar ${d.floodWaitSeconds}s (flood). Lead permanece pendente.`);
+                 } else {
+                     addLog(`❌ Falha ${sender}: ${d.error}`);
+                 }
                  setProgress(stats.pending ? Math.round((totalSent / stats.pending) * 100) : 100);
-                 // Intervalo de 3 segundos entre lotes para respirar
-                 await new Promise(r => setTimeout(r, 3000));
              }
              if (leads.length < 100) break;
          }

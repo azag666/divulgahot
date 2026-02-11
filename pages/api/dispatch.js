@@ -91,15 +91,27 @@ export default async function handler(req, res) {
   } catch (error) {
     await client.disconnect();
     console.error(`Erro ${senderPhone}:`, error.message);
-    
-    // Se for Flood, marca a conta como temporariamente inativa (opcional)
-    if (error.message.includes("PEER_FLOOD")) {
-       // Log de alerta de flood
+
+    const errorMessage = error.message || 'Erro desconhecido';
+    const isFloodWait = /A wait of (\d+) seconds is required/i.test(errorMessage);
+    const isPeerFlood = /PEER_FLOOD/i.test(errorMessage);
+
+    if (isFloodWait || isPeerFlood) {
+      const match = errorMessage.match(/A wait of (\d+) seconds is required/i);
+      const floodWaitSeconds = match ? parseInt(match[1], 10) : 120;
+      if (leadDbId) {
+        // Não marca como failed; lead continua pending para nova tentativa
+      }
+      return res.status(200).json({
+        success: false,
+        error: errorMessage,
+        floodWaitSeconds
+      });
     }
 
     if (leadDbId) {
-      await supabase.from('leads_hottrack').update({ status: 'failed', message_log: error.message }).eq('id', leadDbId);
+      await supabase.from('leads_hottrack').update({ status: 'failed', message_log: errorMessage }).eq('id', leadDbId);
     }
-    return res.status(500).json({ error: error.message });
+    return res.status(500).json({ error: errorMessage });
   }
 }

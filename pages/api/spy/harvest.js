@@ -9,7 +9,7 @@ const apiHash = process.env.TELEGRAM_API_HASH;
 // Limite de mensagens ao varrer histórico de canal (fallback). Reduzir se timeout.
 const CHANNEL_HISTORY_LIMIT = 400;
 
-function buildLead(userId, username, name, originGroup, chatId) {
+function buildLead(userId, username, name, originGroup, chatId, extractedBy) {
   return {
     user_id: userId.toString(),
     username: username ? (username.startsWith('@') ? username : `@${username}`) : null,
@@ -18,12 +18,13 @@ function buildLead(userId, username, name, originGroup, chatId) {
     origin_group: originGroup,
     chat_id: chatId.toString(),
     status: 'pending',
-    message_log: `Extraído de ${originGroup}`
+    message_log: `Extraído de ${originGroup}`,
+    extracted_by: extractedBy ?? null
   };
 }
 
 // GetPollVotes pode retornar POLL_VOTE_REQUIRED; ignorar. Encaminhamento: fwdFrom.fromId pode vir ausente se usuário ocultou reenvio. Reações: maioria anônima. Menções: só entidades com userId (MessageEntityMentionName); @username puro pode não trazer userId.
-async function scanChannelHistory(client, chatId, chatName, sourceLabel, limit) {
+async function scanChannelHistory(client, chatId, chatName, sourceLabel, limit, phone) {
   const uniqueUsers = new Map();
   const originGroup = sourceLabel || `${chatName} (Histórico)`;
 
@@ -65,7 +66,7 @@ async function scanChannelHistory(client, chatId, chatName, sourceLabel, limit) 
               const uid = (u.id ?? u.userId)?.toString?.();
               if (uid && !uniqueUsers.has(uid)) {
                 const name = [u.firstName, u.lastName].filter(Boolean).join(' ') || 'Sem Nome';
-                uniqueUsers.set(uid, buildLead(uid, u.username, name, originGroup, chatId));
+                uniqueUsers.set(uid, buildLead(uid, u.username, name, originGroup, chatId, phone));
               }
             }
           }
@@ -92,7 +93,7 @@ async function scanChannelHistory(client, chatId, chatName, sourceLabel, limit) 
                 username = entity.username ?? null;
               }
             } catch (_) {}
-            uniqueUsers.set(userIdStr, buildLead(userIdStr, username, name, originGroup, chatId));
+            uniqueUsers.set(userIdStr, buildLead(userIdStr, username, name, originGroup, chatId, phone));
           }
         }
       }
@@ -116,7 +117,7 @@ async function scanChannelHistory(client, chatId, chatName, sourceLabel, limit) 
               const uid = (u.id ?? u.userId)?.toString?.();
               if (uid && !uniqueUsers.has(uid)) {
                 const name = [u.firstName, u.lastName].filter(Boolean).join(' ') || 'Sem Nome';
-                uniqueUsers.set(uid, buildLead(uid, u.username, name, originGroup, chatId));
+                uniqueUsers.set(uid, buildLead(uid, u.username, name, originGroup, chatId, phone));
               }
             }
           }
@@ -146,7 +147,7 @@ async function scanChannelHistory(client, chatId, chatName, sourceLabel, limit) 
             username = userEntity.username ?? null;
           }
         } catch (_) {}
-        uniqueUsers.set(userIdStr, buildLead(userIdStr, username, name, originGroup, chatId));
+        uniqueUsers.set(userIdStr, buildLead(userIdStr, username, name, originGroup, chatId, phone));
       }
     } catch (_) {}
   }
@@ -193,7 +194,7 @@ export default async function handler(req, res) {
         }
     } catch (e) {
         if (isChannel) {
-            leads = await scanChannelHistory(client, chatId, chatName, `${chatName} (Histórico)`, CHANNEL_HISTORY_LIMIT);
+            leads = await scanChannelHistory(client, chatId, chatName, `${chatName} (Histórico)`, CHANNEL_HISTORY_LIMIT, phone);
             if (leads.length > 0) finalSource = `${chatName} (Histórico)`;
         }
         if (leads.length === 0) {
@@ -214,7 +215,8 @@ export default async function handler(req, res) {
                     origin_group: finalSource,
                     chat_id: targetId.toString(),
                     status: 'pending',
-                    message_log: `Extraído de ${finalSource}`
+                    message_log: `Extraído de ${finalSource}`,
+                    extracted_by: phone
                 });
             }
         }
