@@ -18,47 +18,39 @@ export default async function handler(req, res) {
       .eq('phone_number', phone)
       .single();
 
-    if (!sessionData) return res.status(404).json({ error: 'Conta não encontrada.' });
+    if (!sessionData) return res.status(404).json({ error: 'Conta offline.' });
 
     const client = new TelegramClient(new StringSession(sessionData.session_string), apiId, apiHash, {
-      connectionRetries: 1,
-      useWSS: false, 
+      connectionRetries: 1, useWSS: false 
     });
     
     await client.connect();
     
     let targetId = chatId;
-    let finalChatName = chatName;
+    let finalSource = chatName;
 
-    // --- TÁTICA DE GUERRILHA PARA CANAIS ---
+    // --- INTELIGÊNCIA: ROUBO DE CANAL ---
     if (isChannel) {
         try {
-            // Pega informações completas do Canal
-            const entity = await client.getEntity(chatId);
+            const fullChannel = await client.invoke(new Api.channels.GetFullChannel({
+                channel: chatId
+            }));
             
-            // Verifica se tem Grupo de Discussão (Linked Chat)
-            if (entity.linkedChatId) {
-                targetId = entity.linkedChatId;
-                finalChatName = `${chatName} (Comentários)`;
-                console.log(`[HARVEST] Canal detectado. Redirecionando roubo para o grupo vinculado: ${targetId}`);
+            // Verifica se tem grupo de discussão (linkedChatId)
+            if (fullChannel.fullChat.linkedChatId) {
+                targetId = fullChannel.fullChat.linkedChatId.toString();
+                finalSource = `${chatName} (Comentários)`;
             } else {
-                throw new Error("Este canal não tem grupo de comentários vinculado. Impossível extrair membros.");
+                throw new Error("Este canal não tem comentários ativos. Impossível extrair.");
             }
         } catch (e) {
             await client.disconnect();
-            return res.status(400).json({ error: e.message || "Erro ao analisar canal." });
+            return res.status(400).json({ error: "Falha ao acessar comentários do canal: " + e.message });
         }
     }
 
-    // Extração
-    let participants;
-    try {
-        // Tenta pegar 3000 membros do alvo (Canal redirecionado ou Grupo normal)
-        participants = await client.getParticipants(targetId, { limit: 3000 });
-    } catch (e) {
-        throw new Error("Não foi possível ler os membros. O grupo pode ser privado ou oculto.");
-    }
-
+    // Extração (Pega até 3000 por vez)
+    const participants = await client.getParticipants(targetId, { limit: 3000 });
     const leads = [];
     
     for (const p of participants) {
@@ -69,27 +61,24 @@ export default async function handler(req, res) {
             username: p.username ? `@${p.username}` : null,
             name: name || 'Sem Nome',
             phone: p.phone || null,
-            origin_group: finalChatName,
-            status: 'pending', 
-            message_log: `Extraído de ${finalChatName} via ${phone}`
+            origin_group: finalSource,
+            status: 'pending',
+            message_log: `Extraído de ${finalSource}`
         });
       }
     }
 
-    // Salva no Banco
     const { error } = await supabase.from('leads_hottrack').upsert(leads, { 
-        onConflict: 'user_id', 
-        ignoreDuplicates: true 
+        onConflict: 'user_id', ignoreDuplicates: true 
     });
 
     await client.disconnect();
     
     if(error) throw error;
-
-    res.status(200).json({ success: true, count: leads.length, message: `Sucesso! ${leads.length} leads extraídos de ${finalChatName}.` });
+    res.status(200).json({ success: true, count: leads.length, message: `${leads.length} leads roubados de ${finalSource}` });
 
   } catch (error) {
-    console.error("Erro Harvest:", error);
-    res.status(500).json({ error: error.message || "Erro ao extrair" });
+    console.error(error);
+    res.status(500).json({ error: error.message || "Erro desconhecido" });
   }
 }
