@@ -1,6 +1,5 @@
-import { TelegramClient, Api } from "telegram";
+import { TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions";
-import { CustomFile } from "telegram/client/uploads";
 import { createClient } from '@supabase/supabase-js';
 const { authenticate } = require('../../lib/middleware');
 
@@ -8,154 +7,73 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY
 const apiId = parseInt(process.env.TELEGRAM_API_ID);
 const apiHash = process.env.TELEGRAM_API_HASH;
 
-function spinText(text) {
-  if (!text) return "";
-  return text.replace(/{([^{}]+)}/g, (match, content) => {
-    const choices = content.split('|');
-    return choices[Math.floor(Math.random() * choices.length)];
-  });
+// Spintax: {Oi|Olá}
+function spin(text) {
+    if(!text) return '';
+    return text.replace(/\{([^{}]+)\}/g, (match, content) => {
+        const choices = content.split('|');
+        return choices[Math.floor(Math.random() * choices.length)];
+    });
 }
 
 export default async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(405).send('Method Not Allowed');
-
-  // Aplica autenticação
   await authenticate(req, res, async () => {
-    let { senderPhone, target, username, originChatId, message, imageUrl, leadDbId } = req.body;
-    const finalMessage = spinText(message);
-
-    // Busca a sessão e valida ownership se não for admin
+    const { senderPhone, target, username, message, imageUrl, leadDbId } = req.body;
+    
+    // Busca sessão
     const { data: sessionData } = await supabase
       .from('telegram_sessions')
-      .select('session_string, owner_id')
+      .select('session_string')
       .eq('phone_number', senderPhone)
       .single();
-    
-    if (!sessionData) return res.status(404).json({ error: 'Sessão offline.' });
 
-    // Se não for admin, valida que a sessão pertence ao usuário logado
-    if (!req.isAdmin && req.userId && sessionData.owner_id !== req.userId) {
-      return res.status(403).json({ error: 'Acesso negado: esta sessão não pertence ao seu usuário.' });
-    }
+    if (!sessionData) return res.status(400).json({ error: 'Sessão inválida' });
 
-    const { data } = { data: { session_string: sessionData.session_string } };
+    const client = new TelegramClient(new StringSession(sessionData.session_string), apiId, apiHash, { 
+        connectionRetries: 1, 
+        useWSS: false 
+    });
 
-  const client = new TelegramClient(new StringSession(data.session_string), apiId, apiHash, { 
-    connectionRetries: 2, 
-    useWSS: false 
-  });
-
-  try {
-    await client.connect();
-
-    let finalPeer = null;
-
-    // --- NÍVEL 1: Username (Prioridade Total) ---
-    if (username) {
-        try {
-            finalPeer = await client.getInputEntity(username.replace('@', ''));
-        } catch (e) { console.log(`[${senderPhone}] Falha ao resolver @${username}, tentando métodos profundos...`); }
-    }
-
-    // --- NÍVEL 2: ID Numérico Direto (Cache Local) ---
-    if (!finalPeer && target) {
-        try {
-            finalPeer = await client.getInputEntity(BigInt(target));
-        } catch (e) {
-            // Falhou no cache simples. Vamos para táticas avançadas.
-            
-            // --- NÍVEL 3: Tática do Grupo de Origem (Se tivermos o ID do Grupo) ---
-            if (originChatId) {
-                try {
-                    // Tenta "ver" o usuário dentro do canal/grupo de onde ele veio
-                    // Isso força o Telegram a entregar a hash de acesso
-                    const channels = await client.invoke(new Api.channels.GetParticipants({
-                        channel: BigInt(originChatId),
-                        filter: new Api.ChannelParticipantsIds({ inputIds: [BigInt(target)] }),
-                        offset: 0,
-                        limit: 1,
-                        hash: 0
-                    }));
-                    
-                    if (channels.users && channels.users.length > 0) {
-                        finalPeer = channels.users[0]; // Pegamos a entidade válida!
-                    }
-                } catch (grpErr) {
-                    // Ignora erro de grupo (pode ser que a conta não esteja mais lá)
-                }
-            }
-
-            // --- NÍVEL 4: Tática "Importação Relâmpago" (Último Recurso) ---
-            if (!finalPeer) {
-                try {
-                    // Adiciona como contato temporário para furar a privacidade
-                    await client.invoke(new Api.contacts.ImportContacts({
-                        contacts: [new Api.InputPhoneContact({
-                            clientId: BigInt(1),
-                            phone: "", 
-                            firstName: "L", 
-                            lastName: target.toString() // Usa o ID como sobrenome pra identificar
-                        })]
-                    }));
-                    
-                    // Agora tenta resolver de novo (agora ele é um contato!)
-                    finalPeer = await client.getInputEntity(BigInt(target));
-                    
-                    // Limpeza: Deleta o contato imediatamente para não sujar a conta
-                    await client.invoke(new Api.contacts.DeleteContacts({id: [finalPeer]}));
-                } catch (contactErr) {
-                    // Se falhar aqui, o usuário realmente blindou a conta ou não existe
-                    await client.disconnect();
-                    if (leadDbId) await supabase.from('leads_hottrack').update({ status: 'failed', message_log: 'Inacessível/Privado' }).eq('id', leadDbId);
-                    return res.status(404).json({ error: "Lead blindado." });
-                }
-            }
-        }
-    }
-
-    // --- DISPARO (Com Delay Humano) ---
-    const action = imageUrl ? new Api.SendMessageUploadPhotoAction() : new Api.SendMessageTypingAction();
-    await client.invoke(new Api.messages.SetTyping({ peer: finalPeer, action }));
-    await new Promise(r => setTimeout(r, Math.floor(Math.random() * 2000) + 1500)); 
-
-    let sentMsg;
-    if (imageUrl) {
-        const mediaRes = await fetch(imageUrl);
-        if(!mediaRes.ok) throw new Error("Erro na imagem");
-        const buffer = Buffer.from(await mediaRes.arrayBuffer());
-        const toUpload = new CustomFile("img.jpg", buffer.byteLength, "image/jpeg", buffer);
-        const uploadedFile = await client.uploadFile({ file: toUpload, workers: 1 });
-        
-        sentMsg = await client.sendMessage(finalPeer, { message: finalMessage, file: uploadedFile, parseMode: "markdown" });
-    } else {
-        sentMsg = await client.sendMessage(finalPeer, { message: finalMessage, parseMode: "markdown", linkPreview: true });
-    }
-
-    // --- MODO FANTASMA: Limpeza ---
     try {
-        await client.deleteMessages(finalPeer, [sentMsg.id], { revoke: false }); 
-    } catch (cE) {}
-    
-    await client.disconnect();
+        await client.connect();
 
-    if (leadDbId) {
-        await supabase.from('leads_hottrack').update({ status: 'sent', last_contacted_at: new Date() }).eq('id', leadDbId);
-    }
-    return res.status(200).json({ success: true });
+        // Envia Mensagem
+        const finalMsg = spin(message);
+        
+        // Se tiver imagem, envia como mídia
+        if (imageUrl && imageUrl.startsWith('http')) {
+            await client.sendMessage(username || target, { 
+                message: finalMsg, 
+                file: imageUrl, 
+                forceDocument: false 
+            });
+        } else {
+            await client.sendMessage(username || target, { message: finalMsg });
+        }
 
-  } catch (error) {
-    await client.disconnect();
-    const errMsg = error.message || "Unknown";
-    
-    if (errMsg.includes("PEER_FLOOD") || errMsg.includes("FLOOD_WAIT")) {
-        return res.status(429).json({ error: "FLOOD" });
-    }
+        await client.disconnect();
 
-    if (leadDbId) {
-        await supabase.from('leads_hottrack').update({ status: 'failed', message_log: errMsg }).eq('id', leadDbId);
+        // Atualiza Status no Banco
+        if (leadDbId) {
+            await supabase.from('leads_hottrack')
+                .update({ status: 'sent', last_interaction: new Date() })
+                .eq('id', leadDbId);
+        }
+
+        res.status(200).json({ success: true });
+
+    } catch (e) {
+        // Tratamento de FLOOD WAIT
+        const errorMsg = e.message || '';
+        if (errorMsg.includes('FLOOD_WAIT_') || errorMsg.includes('420')) {
+            // Tenta extrair os segundos
+            const seconds = errorMsg.match(/\d+/);
+            const waitTime = seconds ? parseInt(seconds[0]) : 60;
+            return res.status(429).json({ error: 'FLOOD_WAIT', wait: waitTime });
+        }
+
+        console.error(`Erro Dispatch ${senderPhone}:`, e);
+        res.status(500).json({ error: e.message });
     }
-    
-    return res.status(500).json({ error: errMsg });
-  }
   });
 }
