@@ -16,21 +16,44 @@ export default async function handler(req, res) {
 
   try {
     await client.connect();
-    // Pega ultimas 20 mensagens
-    const msgs = await client.getMessages(chatId, { limit: 20 });
     
-    const history = msgs.map(m => ({
-        id: m.id,
-        text: m.message || (m.media ? '[Mídia/Arquivo]' : ''),
-        sender: m.sender?.firstName || 'Desconhecido',
-        isOut: m.out,
-        date: m.date,
-        hasMedia: !!m.media
-    })).reverse();
+    // Pega as últimas 15 mensagens (reduzi um pouco para dar tempo de baixar as fotos)
+    const msgs = await client.getMessages(chatId, { limit: 15 });
+    
+    const history = [];
+
+    for (const m of msgs) {
+        let mediaBase64 = null;
+        
+        // Se tiver foto, tenta baixar (thumbnail pequena para ser rápido)
+        if (m.media && m.media.photo) {
+            try {
+                const buffer = await client.downloadMedia(m, { workers: 1 });
+                if (buffer) {
+                    mediaBase64 = `data:image/jpeg;base64,${buffer.toString('base64')}`;
+                }
+            } catch (err) {
+                console.log('Erro ao baixar mídia:', err.message);
+            }
+        }
+
+        history.push({
+            id: m.id,
+            text: m.message || '',
+            sender: m.sender?.firstName || 'Desconhecido',
+            isOut: m.out,
+            date: m.date,
+            media: mediaBase64, // Agora enviamos a imagem
+            hasMedia: !!m.media
+        });
+    }
 
     await client.disconnect();
-    res.json({ history });
+    // Inverte para ficar na ordem cronológica (antigas em cima)
+    res.json({ history: history.reverse() });
+
   } catch (e) {
+    console.error(e);
     res.status(500).json({ error: e.message });
   }
 }
