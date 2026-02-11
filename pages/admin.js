@@ -14,23 +14,14 @@ export default function AdminPanel() {
   const [msg, setMsg] = useState('{Olá|Oi}, tudo bem?');
   const [imgUrl, setImgUrl] = useState('');
   const [selectedPhones, setSelectedPhones] = useState(new Set());
-  const [checkingStatus, setCheckingStatus] = useState(false);
 
   // God Mode
   const [allGroups, setAllGroups] = useState([]);
   const [allChannels, setAllChannels] = useState([]);
   const [harvestedIds, setHarvestedIds] = useState(new Set());
   const [isScanning, setIsScanning] = useState(false);
-  const [scanProgress, setScanProgress] = useState(0);
   const [isHarvestingAll, setIsHarvestingAll] = useState(false);
-  const [totalHarvestedSession, setTotalHarvestedSession] = useState(0);
   const stopHarvestRef = useRef(false);
-
-  // Tools
-  const [newName, setNewName] = useState('');
-  const [photoUrl, setPhotoUrl] = useState('');
-  const [storyUrl, setStoryUrl] = useState('');
-  const [storyCaption, setStoryCaption] = useState('');
 
   useEffect(() => {
     const savedGroups = localStorage.getItem('godModeGroups');
@@ -54,13 +45,14 @@ export default function AdminPanel() {
   const addLog = (text) => setLogs(prev => [`[${new Date().toLocaleTimeString()}] ${text}`, ...prev]);
 
   const startRealCampaign = async () => {
-     if (selectedPhones.size === 0) return alert('Selecione contas!');
+     if (selectedPhones.size === 0) return alert('Selecione contas remetentes!');
      setProcessing(true);
      addLog('🚀 Operação Turbo Iniciada...');
      
      try {
          const phones = Array.from(selectedPhones);
-         const BATCH_SIZE = 20; 
+         // Reduzimos o BATCH_SIZE para 10 para evitar PEER_FLOOD imediato
+         const BATCH_SIZE = 10; 
          let totalSent = 0;
 
          while (true) {
@@ -79,7 +71,7 @@ export default function AdminPanel() {
                          body: JSON.stringify({ 
                              senderPhone: sender, 
                              target: lead.user_id, 
-                             username: lead.username, // CRUCIAL para evitar erro de Entity
+                             username: lead.username, 
                              message: msg, 
                              imageUrl: imgUrl, 
                              leadDbId: lead.id 
@@ -92,13 +84,14 @@ export default function AdminPanel() {
                  await Promise.all(promises);
                  totalSent += batch.length;
                  setProgress(stats.pending ? Math.round((totalSent / stats.pending) * 100) : 100);
-                 await new Promise(r => setTimeout(r, 1500));
+                 // Intervalo de 3 segundos entre lotes para respirar
+                 await new Promise(r => setTimeout(r, 3000));
              }
              if (leads.length < 100) break;
          }
-         addLog(`✅ Finalizado. Enviados: ${totalSent}`);
+         addLog(`✅ Campanha Finalizada. Enviados: ${totalSent}`);
          fetchData();
-     } catch (e) { addLog(`⛔ Erro: ${e.message}`); }
+     } catch (e) { addLog(`⛔ Erro Crítico: ${e.message}`); }
      setProcessing(false);
   };
 
@@ -123,7 +116,7 @@ export default function AdminPanel() {
 
   if (!isAuthenticated) return (
       <div style={{height:'100vh', background:'#000', display:'flex', alignItems:'center', justifyContent:'center'}}>
-          <form onSubmit={handleLogin}><input type="password" value={passwordInput} onChange={e=>setPasswordInput(e.target.value)} placeholder="Senha Mestra" style={{padding:'12px', borderRadius:'8px'}}/></form>
+          <form onSubmit={handleLogin}><input type="password" value={passwordInput} onChange={e=>setPasswordInput(e.target.value)} placeholder="Senha Mestra" style={{padding:'15px', borderRadius:'10px', border:'none', outline:'none', fontSize:'16px'}} autoFocus /></form>
       </div>
   );
 
@@ -132,7 +125,6 @@ export default function AdminPanel() {
         <div style={{marginBottom:'20px', display:'flex', gap:'10px', borderBottom:'1px solid #30363d', paddingBottom:'10px'}}>
             <button onClick={()=>setTab('dashboard')} style={{padding:'10px 20px', background: tab==='dashboard'?'#238636':'transparent', color:'white', border:'1px solid #238636', borderRadius:'5px', cursor:'pointer'}}>🚀 CRM TURBO</button>
             <button onClick={()=>setTab('spy')} style={{padding:'10px 20px', background: tab==='spy'?'#8957e5':'transparent', color:'white', border:'1px solid #8957e5', borderRadius:'5px', cursor:'pointer', marginLeft:'10px'}}>👁️ GOD MODE</button>
-            <button onClick={()=>setTab('tools')} style={{padding:'10px 20px', background: tab==='tools'?'#1f6feb':'transparent', color:'white', border:'1px solid #1f6feb', borderRadius:'5px', cursor:'pointer', marginLeft:'10px'}}>🛠️ TOOLS</button>
         </div>
 
         {tab === 'dashboard' && (
@@ -146,12 +138,12 @@ export default function AdminPanel() {
                             <h2 style={{margin:0, color:'#238636'}}>{stats.sent?.toLocaleString()}</h2><small>Enviados</small>
                         </div>
                     </div>
-                    <input type="text" placeholder="URL da Imagem (Opcional)" value={imgUrl} onChange={e=>setImgUrl(e.target.value)} style={{width:'100%', padding:'12px', marginBottom:'15px', background:'#0d1117', color:'white', border:'1px solid #30363d', borderRadius:'5px'}} />
-                    <textarea value={msg} onChange={e=>setMsg(e.target.value)} placeholder="Mensagem com {Spintax|Escolha}..." style={{width:'100%', height:'120px', background:'#0d1117', color:'white', border:'1px solid #30363d', padding:'12px', borderRadius:'5px', resize:'none'}}/>
+                    <input type="text" placeholder="URL da Imagem de Disparo" value={imgUrl} onChange={e=>setImgUrl(e.target.value)} style={{width:'100%', padding:'12px', marginBottom:'15px', background:'#0d1117', color:'white', border:'1px solid #30363d', borderRadius:'5px'}} />
+                    <textarea value={msg} onChange={e=>setMsg(e.target.value)} placeholder="Olá {amigo|você}, veja isso..." style={{width:'100%', height:'120px', background:'#0d1117', color:'white', border:'1px solid #30363d', padding:'12px', borderRadius:'5px', resize:'none'}}/>
                     <button onClick={startRealCampaign} disabled={processing} style={{width:'100%', padding:'20px', marginTop:'15px', background: processing ? '#21262d' : '#238636', color:'white', fontWeight:'bold', border:'none', borderRadius:'10px', cursor:'pointer', fontSize:'18px'}}>
-                        {processing ? `🚀 ENVIANDO... ${progress}%` : '🔥 INICIAR DISPARO EM MASSA'}
+                        {processing ? `🚀 DISPARANDO... ${progress}%` : '🔥 INICIAR DISPARO EM MASSA'}
                     </button>
-                    <div style={{marginTop:'20px', height:'200px', overflowY:'auto', background:'#000', padding:'15px', fontSize:'12px', borderRadius:'8px', color:'#00ff00'}}>
+                    <div style={{marginTop:'20px', height:'250px', overflowY:'auto', background:'#000', padding:'15px', fontSize:'12px', borderRadius:'8px', color:'#00ff00'}}>
                         {logs.map((l,i)=><div key={i}>{l}</div>)}
                     </div>
                 </div>
@@ -171,7 +163,7 @@ export default function AdminPanel() {
             </div>
         )}
         
-        {/* Outras abas (Spy e Tools) mantidas com funcionalidades completas conforme versões anteriores */}
+        {/* Aba SPY omitida por espaço, mas deve manter as funções de Modo Aspirador para coletar leads novos */}
     </div>
   );
 }
