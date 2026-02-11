@@ -1,4 +1,4 @@
-import { TelegramClient } from "telegram";
+import { TelegramClient, Api } from "telegram"; // <--- ADICIONADO { Api }
 import { StringSession } from "telegram/sessions";
 import { createClient } from '@supabase/supabase-js';
 
@@ -18,7 +18,7 @@ export default async function handler(req, res) {
       .eq('phone_number', phone)
       .single();
 
-    if (!sessionData) return res.status(404).json({ error: 'Conta offline.' });
+    if (!sessionData) return res.status(404).json({ error: 'Conta offline ou não encontrada.' });
 
     const client = new TelegramClient(new StringSession(sessionData.session_string), apiId, apiHash, {
       connectionRetries: 1, useWSS: false 
@@ -29,28 +29,37 @@ export default async function handler(req, res) {
     let targetId = chatId;
     let finalSource = chatName;
 
-    // --- INTELIGÊNCIA: ROUBO DE CANAL ---
+    // --- LÓGICA DE CANAIS (FIXED) ---
     if (isChannel) {
         try {
+            // Agora 'Api' está definido e vai funcionar
             const fullChannel = await client.invoke(new Api.channels.GetFullChannel({
                 channel: chatId
             }));
             
-            // Verifica se tem grupo de discussão (linkedChatId)
             if (fullChannel.fullChat.linkedChatId) {
                 targetId = fullChannel.fullChat.linkedChatId.toString();
                 finalSource = `${chatName} (Comentários)`;
+                console.log(`[HARVEST] Redirecionando Canal ${chatId} para Grupo ${targetId}`);
             } else {
-                throw new Error("Este canal não tem comentários ativos. Impossível extrair.");
+                throw new Error("Este canal não possui comentários ativados (Linked Chat).");
             }
         } catch (e) {
             await client.disconnect();
-            return res.status(400).json({ error: "Falha ao acessar comentários do canal: " + e.message });
+            return res.status(400).json({ error: "Erro ao acessar comentários: " + (e.message || e) });
         }
     }
 
-    // Extração (Pega até 3000 por vez)
-    const participants = await client.getParticipants(targetId, { limit: 3000 });
+    // Extração
+    let participants;
+    try {
+        // Tenta pegar membros (até 3000)
+        participants = await client.getParticipants(targetId, { limit: 3000 });
+    } catch (e) {
+        await client.disconnect();
+        return res.status(400).json({ error: "Não foi possível ler os membros (Grupo Privado ou Oculto)." });
+    }
+
     const leads = [];
     
     for (const p of participants) {
@@ -79,6 +88,6 @@ export default async function handler(req, res) {
 
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: error.message || "Erro desconhecido" });
+    res.status(500).json({ error: error.message || "Erro interno ao extrair" });
   }
 }
