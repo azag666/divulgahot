@@ -3,27 +3,29 @@ import { createClient } from '@supabase/supabase-js';
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
 export default async function handler(req, res) {
-    const { limit, ownerId } = req.query;
+    const { limit, random } = req.query; // Adicionado param 'random'
 
     try {
-        // Busca APENAS status 'pending'
-        // 'sent' e 'failed' são ignorados, resolvendo o problema de reenvio
-        let query = supabase
-            .from('leads_hottrack')
-            .select('id, user_id, username, chat_id, status')
-            .eq('status', 'pending') 
-            // ORDENAÇÃO ESTRATÉGICA:
-            // 1. Quem tem Username primeiro (Envio Rápido)
-            // 2. Os mais recentes (criado pela bola de neve) primeiro
-            .order('username', { ascending: false, nullsFirst: false }) 
-            .order('created_at', { ascending: false }) 
-            .limit(limit || 100);
-        
-        if (ownerId) {
-            query = query.eq('owner_id', ownerId);
+        let data, error;
+
+        if (random === 'true') {
+            // Usa a função SQL para sorteio rápido (Alta Performance)
+            const result = await supabase.rpc('get_random_leads', { 
+                limit_count: parseInt(limit) || 100 
+            });
+            data = result.data;
+            error = result.error;
+        } else {
+            // Método antigo (Sequencial)
+            const result = await supabase
+                .from('leads_hottrack')
+                .select('id, user_id, username, chat_id, status')
+                .eq('status', 'pending')
+                .order('id', { ascending: true }) // Segue a ordem de inserção
+                .limit(limit || 100);
+            data = result.data;
+            error = result.error;
         }
-        
-        const { data, error } = await query;
         
         if (error) throw error;
         
