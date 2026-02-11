@@ -8,11 +8,13 @@
     "start": "next start"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
+    "bcryptjs": "^3.0.3",
+    "input": "^1.0.0",
+    "jsonwebtoken": "^9.0.3",
     "next": "latest",
     "react": "latest",
     "react-dom": "latest",
-    "telegram": "^2.22.2",
-    "@supabase/supabase-js": "^2.39.0",
-    "input": "^1.0.0"
+    "telegram": "^2.22.2"
   }
 }

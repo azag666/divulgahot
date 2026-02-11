@@ -2,6 +2,7 @@ import { TelegramClient, Api } from "telegram";
 import { StringSession } from "telegram/sessions";
 import { CustomFile } from "telegram/client/uploads";
 import { createClient } from '@supabase/supabase-js';
+const { authenticate } = require('../../lib/middleware');
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 const apiId = parseInt(process.env.TELEGRAM_API_ID);
@@ -18,11 +19,26 @@ function spinText(text) {
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).send('Method Not Allowed');
 
-  let { senderPhone, target, username, originChatId, message, imageUrl, leadDbId } = req.body;
-  const finalMessage = spinText(message);
+  // Aplica autenticação
+  await authenticate(req, res, async () => {
+    let { senderPhone, target, username, originChatId, message, imageUrl, leadDbId } = req.body;
+    const finalMessage = spinText(message);
 
-  const { data } = await supabase.from('telegram_sessions').select('session_string').eq('phone_number', senderPhone).single();
-  if (!data) return res.status(404).json({ error: 'Sessão offline.' });
+    // Busca a sessão e valida ownership se não for admin
+    const { data: sessionData } = await supabase
+      .from('telegram_sessions')
+      .select('session_string, owner_id')
+      .eq('phone_number', senderPhone)
+      .single();
+    
+    if (!sessionData) return res.status(404).json({ error: 'Sessão offline.' });
+
+    // Se não for admin, valida que a sessão pertence ao usuário logado
+    if (!req.isAdmin && req.userId && sessionData.owner_id !== req.userId) {
+      return res.status(403).json({ error: 'Acesso negado: esta sessão não pertence ao seu usuário.' });
+    }
+
+    const { data } = { data: { session_string: sessionData.session_string } };
 
   const client = new TelegramClient(new StringSession(data.session_string), apiId, apiHash, { 
     connectionRetries: 2, 
@@ -141,4 +157,5 @@ export default async function handler(req, res) {
     
     return res.status(500).json({ error: errMsg });
   }
+  });
 }

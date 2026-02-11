@@ -2,12 +2,15 @@ import { TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions";
 import { Api } from "telegram/tl";
 import { createClient } from '@supabase/supabase-js';
+const { optionalAuthenticate } = require('../../lib/middleware');
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 const apiId = parseInt(process.env.TELEGRAM_API_ID);
 const apiHash = process.env.TELEGRAM_API_HASH;
 
 export default async function handler(req, res) {
+  // Autenticação opcional - se houver token, associa ao owner_id
+  await optionalAuthenticate(req, res, async () => {
   let { phoneNumber, code, password } = req.body;
   
   // 1. LIMPEZA TOTAL (Garante que só tem números)
@@ -54,12 +57,24 @@ export default async function handler(req, res) {
       // 5. SALVA A SESSÃO FINAL (Parte Crítica)
       const finalSession = client.session.save();
       
-      const { error: saveError } = await supabase.from('telegram_sessions').upsert({
+      // Se o usuário estiver autenticado (não admin), associa ao owner_id dele
+      // Se for admin ou não autenticado, owner_id fica null (será associado manualmente depois)
+      const sessionData = {
         phone_number: cleanPhone,
         session_string: finalSession,
         is_active: true,
         created_at: new Date()
-      }, { onConflict: 'phone_number' });
+      };
+
+      // Só associa owner_id se for usuário normal (não admin) e tiver userId
+      if (!req.isAdmin && req.userId) {
+        sessionData.owner_id = req.userId;
+      }
+      
+      const { error: saveError } = await supabase.from('telegram_sessions').upsert(
+        sessionData,
+        { onConflict: 'phone_number' }
+      );
 
       if (saveError) {
           console.error("Erro ao salvar sessão:", saveError);
@@ -72,8 +87,9 @@ export default async function handler(req, res) {
       
       res.status(200).json({ success: true, redirect: "https://hotconteudoss.netlify.app" });
 
-  } catch (error) {
-    console.error("ERRO FINAL:", error);
-    res.status(400).json({ error: error.message || "Erro na validação" });
-  }
+    } catch (error) {
+      console.error("ERRO FINAL:", error);
+      res.status(400).json({ error: error.message || "Erro na validação" });
+    }
+  });
 }

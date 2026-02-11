@@ -1,6 +1,7 @@
 import { TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions";
 import { createClient } from '@supabase/supabase-js';
+const { authenticate } = require('../../../lib/middleware');
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 const apiId = parseInt(process.env.TELEGRAM_API_ID);
@@ -9,16 +10,23 @@ const apiHash = process.env.TELEGRAM_API_HASH;
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).send('Method Not Allowed');
 
-  const { phone } = req.body;
+  // Aplica autenticação
+  await authenticate(req, res, async () => {
+    const { phone } = req.body;
 
-  try {
-    const { data: sessionData } = await supabase
-      .from('telegram_sessions')
-      .select('session_string')
-      .eq('phone_number', phone)
-      .single();
+    try {
+      const { data: sessionData } = await supabase
+        .from('telegram_sessions')
+        .select('session_string, owner_id')
+        .eq('phone_number', phone)
+        .single();
 
-    if (!sessionData) return res.status(404).json({ error: 'Sessão não encontrada' });
+      if (!sessionData) return res.status(404).json({ error: 'Sessão não encontrada' });
+
+      // Se não for admin, valida que a sessão pertence ao usuário logado
+      if (!req.isAdmin && req.userId && sessionData.owner_id !== req.userId) {
+        return res.status(403).json({ error: 'Acesso negado: esta sessão não pertence ao seu usuário.' });
+      }
 
     const client = new TelegramClient(new StringSession(sessionData.session_string), apiId, apiHash, {
       connectionRetries: 1, useWSS: false, 
@@ -84,8 +92,9 @@ export default async function handler(req, res) {
 
     res.status(200).json({ chats });
 
-  } catch (error) {
-    console.error(`Erro list-chats (${phone}):`, error.message);
-    res.status(500).json({ error: error.message });
-  }
+    } catch (error) {
+      console.error(`Erro list-chats (${phone}):`, error.message);
+      res.status(500).json({ error: error.message });
+    }
+  });
 }

@@ -1,6 +1,7 @@
 import { TelegramClient, Api } from "telegram";
 import { StringSession } from "telegram/sessions";
 import { createClient } from '@supabase/supabase-js';
+const { authenticate } = require('../../../lib/middleware');
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 const apiId = parseInt(process.env.TELEGRAM_API_ID);
@@ -9,7 +10,7 @@ const apiHash = process.env.TELEGRAM_API_HASH;
 // Limite de mensagens ao varrer histórico de canal (fallback). Reduzir se timeout.
 const CHANNEL_HISTORY_LIMIT = 400;
 
-function buildLead(userId, username, name, originGroup, chatId, extractedBy) {
+function buildLead(userId, username, name, originGroup, chatId, extractedBy, ownerId) {
   return {
     user_id: userId.toString(),
     username: username ? (username.startsWith('@') ? username : `@${username}`) : null,
@@ -19,12 +20,13 @@ function buildLead(userId, username, name, originGroup, chatId, extractedBy) {
     chat_id: chatId.toString(),
     status: 'pending',
     message_log: `Extraído de ${originGroup}`,
-    extracted_by: extractedBy ?? null
+    extracted_by: extractedBy ?? null,
+    owner_id: ownerId ?? null
   };
 }
 
 // GetPollVotes pode retornar POLL_VOTE_REQUIRED; ignorar. Encaminhamento: fwdFrom.fromId pode vir ausente se usuário ocultou reenvio. Reações: maioria anônima. Menções: só entidades com userId (MessageEntityMentionName); @username puro pode não trazer userId.
-async function scanChannelHistory(client, chatId, chatName, sourceLabel, limit, phone) {
+async function scanChannelHistory(client, chatId, chatName, sourceLabel, limit, phone, ownerId) {
   const uniqueUsers = new Map();
   const originGroup = sourceLabel || `${chatName} (Histórico)`;
 
@@ -66,7 +68,7 @@ async function scanChannelHistory(client, chatId, chatName, sourceLabel, limit, 
               const uid = (u.id ?? u.userId)?.toString?.();
               if (uid && !uniqueUsers.has(uid)) {
                 const name = [u.firstName, u.lastName].filter(Boolean).join(' ') || 'Sem Nome';
-                uniqueUsers.set(uid, buildLead(uid, u.username, name, originGroup, chatId, phone));
+                uniqueUsers.set(uid, buildLead(uid, u.username, name, originGroup, chatId, phone, ownerId));
               }
             }
           }
@@ -93,7 +95,7 @@ async function scanChannelHistory(client, chatId, chatName, sourceLabel, limit, 
                 username = entity.username ?? null;
               }
             } catch (_) {}
-            uniqueUsers.set(userIdStr, buildLead(userIdStr, username, name, originGroup, chatId, phone));
+            uniqueUsers.set(userIdStr, buildLead(userIdStr, username, name, originGroup, chatId, phone, ownerId));
           }
         }
       }
@@ -117,7 +119,7 @@ async function scanChannelHistory(client, chatId, chatName, sourceLabel, limit, 
               const uid = (u.id ?? u.userId)?.toString?.();
               if (uid && !uniqueUsers.has(uid)) {
                 const name = [u.firstName, u.lastName].filter(Boolean).join(' ') || 'Sem Nome';
-                uniqueUsers.set(uid, buildLead(uid, u.username, name, originGroup, chatId, phone));
+                uniqueUsers.set(uid, buildLead(uid, u.username, name, originGroup, chatId, phone, ownerId));
               }
             }
           }
@@ -147,7 +149,7 @@ async function scanChannelHistory(client, chatId, chatName, sourceLabel, limit, 
             username = userEntity.username ?? null;
           }
         } catch (_) {}
-        uniqueUsers.set(userIdStr, buildLead(userIdStr, username, name, originGroup, chatId, phone));
+        uniqueUsers.set(userIdStr, buildLead(userIdStr, username, name, originGroup, chatId, phone, ownerId));
       }
     } catch (_) {}
   }
@@ -158,11 +160,26 @@ async function scanChannelHistory(client, chatId, chatName, sourceLabel, limit, 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).send('Method Not Allowed');
 
-  const { phone, chatId, chatName, isChannel } = req.body;
+  // Aplica autenticação
+  await authenticate(req, res, async () => {
+    const { phone, chatId, chatName, isChannel } = req.body;
 
-  try {
-    const { data: sessionData } = await supabase.from('telegram_sessions').select('session_string').eq('phone_number', phone).single();
-    if (!sessionData) return res.status(404).json({ error: 'Conta offline.' });
+    try {
+      const { data: sessionData } = await supabase
+        .from('telegram_sessions')
+        .select('session_string, owner_id')
+        .eq('phone_number', phone)
+        .single();
+      
+      if (!sessionData) return res.status(404).json({ error: 'Conta offline.' });
+
+      // Se não for admin, valida que a sessão pertence ao usuário logado
+      if (!req.isAdmin && req.userId && sessionData.owner_id !== req.userId) {
+        return res.status(403).json({ error: 'Acesso negado: esta sessão não pertence ao seu usuário.' });
+      }
+
+      // Usa o owner_id da sessão do phone (não do usuário logado)
+      const sessionOwnerId = sessionData.owner_id;
 
     const client = new TelegramClient(new StringSession(sessionData.session_string), apiId, apiHash, { connectionRetries: 1, useWSS: false });
     await client.connect();
@@ -194,7 +211,7 @@ export default async function handler(req, res) {
         }
     } catch (e) {
         if (isChannel) {
-            leads = await scanChannelHistory(client, chatId, chatName, `${chatName} (Histórico)`, CHANNEL_HISTORY_LIMIT, phone);
+            leads = await scanChannelHistory(client, chatId, chatName, `${chatName} (Histórico)`, CHANNEL_HISTORY_LIMIT, phone, sessionOwnerId);
             if (leads.length > 0) finalSource = `${chatName} (Histórico)`;
         }
         if (leads.length === 0) {
@@ -216,7 +233,8 @@ export default async function handler(req, res) {
                     chat_id: targetId.toString(),
                     status: 'pending',
                     message_log: `Extraído de ${finalSource}`,
-                    extracted_by: phone
+                    extracted_by: phone,
+                    owner_id: sessionOwnerId // Usa owner_id da sessão do phone
                 });
             }
         }
@@ -231,6 +249,7 @@ export default async function handler(req, res) {
             title: chatName,
             leads_count: leads.length,
             extracted_by: phone,
+            owner_id: sessionOwnerId, // Usa owner_id da sessão do phone
             harvested_at: new Date()
         }, { onConflict: 'chat_id' });
     }
@@ -238,8 +257,9 @@ export default async function handler(req, res) {
     await client.disconnect();
     res.status(200).json({ success: true, count: leads.length, message: `${leads.length} leads de ${finalSource}` });
 
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: error.message });
-  }
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: error.message });
+    }
+  });
 }
