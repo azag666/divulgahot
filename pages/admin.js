@@ -149,53 +149,50 @@ export default function AdminPanel() {
      addLog('🚀 Iniciando campanha massiva...');
      
      try {
-         // 1. Pega leads do banco
-         const res = await fetch('/api/get-campaign-leads'); 
-         const data = await res.json();
-         const leads = data.leads || [];
-         
-         if (leads.length === 0) { setProcessing(false); return alert('Sem leads pendentes!'); }
-         
          const phones = Array.from(selectedPhones);
-         const BATCH_SIZE = 20; // Envia 20 de cada vez (Paralelismo)
-         
-         for (let i = 0; i < leads.length; i += BATCH_SIZE) {
-             const batch = leads.slice(i, i + BATCH_SIZE);
-             const promises = [];
+         const BATCH_SIZE = 20;
+         const LEADS_PER_FETCH = 200;
+         const MAX_PER_RUN = 0;
 
-             batch.forEach((lead, index) => {
-                 // Distribuição Round Robin (Rodízio de Contas)
-                 const senderIndex = (i + index) % phones.length;
-                 const sender = phones[senderIndex];
-                 
-                 promises.push(
-                     fetch('/api/dispatch', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({ 
-                            senderPhone: sender, 
-                            target: lead.user_id, 
-                            message: msg, 
-                            imageUrl: imgUrl, // Envia a imagem se tiver
-                            leadDbId: lead.id 
-                        })
+         let totalSent = 0;
+         addLog('🚀 Iniciando disparo em massa...');
+
+         while (true) {
+             const res = await fetch(`/api/get-campaign-leads?limit=${LEADS_PER_FETCH}`);
+             const data = await res.json();
+             const leads = data.leads || [];
+             if (leads.length === 0) break;
+             if (MAX_PER_RUN > 0 && totalSent >= MAX_PER_RUN) break;
+
+             const toSend = MAX_PER_RUN > 0 ? leads.slice(0, MAX_PER_RUN - totalSent) : leads;
+             for (let i = 0; i < toSend.length; i += BATCH_SIZE) {
+                 const batch = toSend.slice(i, i + BATCH_SIZE);
+                 const promises = batch.map((lead, index) => {
+                     const sender = phones[(totalSent + i + index) % phones.length];
+                     return fetch('/api/dispatch', {
+                         method: 'POST',
+                         headers: { 'Content-Type': 'application/json' },
+                         body: JSON.stringify({
+                             senderPhone: sender,
+                             target: lead.user_id,
+                             message: msg,
+                             imageUrl: imgUrl,
+                             leadDbId: lead.id
+                         })
                      }).then(r => r.json()).then(d => {
-                         if(!d.success) addLog(`❌ Falha ${sender}: ${d.error}`);
-                     })
-                 );
-             });
-
-             // Aguarda o lote terminar
-             await Promise.all(promises);
-             
-             // Atualiza barra de progresso
-             const percent = Math.round(((i + batch.length) / leads.length) * 100);
-             setProgress(percent);
-             
-             // Delay de segurança
-             await new Promise(r => setTimeout(r, 1000));
+                         if (!d.success) addLog(`❌ Falha ${sender}: ${d.error}`);
+                     });
+                 });
+                 await Promise.all(promises);
+                 totalSent += batch.length;
+                 setProgress(stats.pending ? Math.round((totalSent / stats.pending) * 100) : 100);
+                 await new Promise(r => setTimeout(r, 1000));
+             }
+             if (toSend.length < LEADS_PER_FETCH) break;
          }
-         addLog('✅ Campanha finalizada.'); fetchData();
+
+         addLog(`✅ Campanha finalizada. Enviados: ${totalSent}`);
+         fetchData();
      } catch (e) { addLog(`⛔ Erro Fatal: ${e.message}`); }
      setProcessing(false);
   };
