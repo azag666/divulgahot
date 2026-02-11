@@ -17,23 +17,26 @@ export default async function handler(req, res) {
   try {
     await client.connect();
     
-    // Pega as últimas 15 mensagens (reduzi um pouco para dar tempo de baixar as fotos)
+    // Pega 15 últimas msg
     const msgs = await client.getMessages(chatId, { limit: 15 });
     
     const history = [];
 
     for (const m of msgs) {
         let mediaBase64 = null;
-        
-        // Se tiver foto, tenta baixar (thumbnail pequena para ser rápido)
-        if (m.media && m.media.photo) {
+        let hasMedia = false;
+
+        // Verifica se tem mídia (Foto ou Documento de Imagem)
+        if (m.media) {
+            hasMedia = true;
             try {
+                // Força download da thumbnail ou foto pequena para ser rápido
                 const buffer = await client.downloadMedia(m, { workers: 1 });
                 if (buffer) {
                     mediaBase64 = `data:image/jpeg;base64,${buffer.toString('base64')}`;
                 }
             } catch (err) {
-                console.log('Erro ao baixar mídia:', err.message);
+                console.log('Erro mídia:', err.message);
             }
         }
 
@@ -43,17 +46,15 @@ export default async function handler(req, res) {
             sender: m.sender?.firstName || 'Desconhecido',
             isOut: m.out,
             date: m.date,
-            media: mediaBase64, // Agora enviamos a imagem
-            hasMedia: !!m.media
+            media: mediaBase64,
+            hasMedia: hasMedia
         });
     }
 
     await client.disconnect();
-    // Inverte para ficar na ordem cronológica (antigas em cima)
     res.json({ history: history.reverse() });
 
   } catch (e) {
-    console.error(e);
     res.status(500).json({ error: e.message });
   }
 }
