@@ -1,50 +1,56 @@
 import { useState, useEffect, useRef } from 'react';
 
 export default function AdminPanel() {
-  // --- AUTH ---
+  // --- ESTADOS DE AUTENTICAÇÃO ---
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [authToken, setAuthToken] = useState('');
-  const [isAdmin, setIsAdmin] = useState(false);
   const [loginMode, setLoginMode] = useState('user');
   const [usernameInput, setUsernameInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
   const [adminTokenInput, setAdminTokenInput] = useState('');
-
-  // --- UI ---
-  const [tab, setTab] = useState('dashboard'); // dashboard, inbox, spy, tools
-  const [logs, setLogs] = useState([]);
-
-  // --- DADOS ---
+  const [authToken, setAuthToken] = useState('');
+  const [isAdmin, setIsAdmin] = useState(false);
+  
+  // --- NAVEGAÇÃO ---
+  const [tab, setTab] = useState('dashboard'); 
+  
+  // --- DADOS DO SISTEMA ---
   const [sessions, setSessions] = useState([]);
   const [stats, setStats] = useState({ total: 0, pending: 0, sent: 0 });
-  const [selectedPhones, setSelectedPhones] = useState(new Set());
-
-  // --- ENGINE V8 (DISPARO) ---
+  const [logs, setLogs] = useState([]);
+  
+  // --- DISPARO & CRM ---
   const [processing, setProcessing] = useState(false);
   const [msg, setMsg] = useState('{Olá|Oi}, tudo bem?');
   const [imgUrl, setImgUrl] = useState('');
-  const [useRandomLeads, setUseRandomLeads] = useState(true);
+  const [selectedPhones, setSelectedPhones] = useState(new Set());
+  const [progress, setProgress] = useState(0);
+  const [checkingStatus, setCheckingStatus] = useState(false);
+  const [useRandom, setUseRandom] = useState(true); // Flag de Aleatoriedade
   const stopCampaignRef = useRef(false);
 
-  // --- INBOX 2.0 ---
-  const [replies, setReplies] = useState([]);
-  const [loadingReplies, setLoadingReplies] = useState(false);
-  const [selectedChat, setSelectedChat] = useState(null);
-  const [chatHistory, setChatHistory] = useState([]);
-  const [loadingChat, setLoadingChat] = useState(false);
-
-  // --- SPY & TOOLS ---
+  // --- GOD MODE (ESPIÃO) ---
+  const [allGroups, setAllGroups] = useState([]);
+  const [allChannels, setAllChannels] = useState([]);
   const [harvestedIds, setHarvestedIds] = useState(new Set());
   const [isScanning, setIsScanning] = useState(false);
-  const [allGroups, setAllGroups] = useState([]); // Cache local do scan
-  
-  // Inputs Tools
+  const [filterNumber, setFilterNumber] = useState('');
+  const [isHarvestingAll, setIsHarvestingAll] = useState(false);
+  const stopHarvestRef = useRef(false);
+
+  // --- FERRAMENTAS ---
   const [newName, setNewName] = useState('');
   const [photoUrl, setPhotoUrl] = useState('');
   const [storyUrl, setStoryUrl] = useState('');
   const [storyCaption, setStoryCaption] = useState('');
 
-  // --- INIT ---
+  // --- INBOX (NOVO) ---
+  const [replies, setReplies] = useState([]);
+  const [loadingReplies, setLoadingReplies] = useState(false);
+  const [selectedChat, setSelectedChat] = useState(null);
+  const [chatHistory, setChatHistory] = useState([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+
+  // --- INICIALIZAÇÃO ---
   useEffect(() => {
     const savedToken = localStorage.getItem('authToken');
     if (savedToken) {
@@ -53,17 +59,16 @@ export default function AdminPanel() {
       try {
         const payload = JSON.parse(atob(savedToken.split('.')[1]));
         setIsAdmin(payload.isAdmin === true || payload.type === 'admin');
-      } catch (e) {}
+      } catch (e) { setIsAdmin(false); }
     }
+    const savedGroups = localStorage.getItem('godModeGroups');
+    const savedChannels = localStorage.getItem('godModeChannels');
+    if (savedGroups) setAllGroups(JSON.parse(savedGroups));
+    if (savedChannels) setAllChannels(JSON.parse(savedChannels));
   }, []);
 
   useEffect(() => {
-    if (isAuthenticated && authToken) {
-        fetchData();
-        // Tenta carregar cache de grupos
-        const savedG = localStorage.getItem('godModeGroups');
-        if(savedG) setAllGroups(JSON.parse(savedG));
-    }
+    if (isAuthenticated && authToken) fetchData();
   }, [isAuthenticated, authToken]);
 
   const authenticatedFetch = async (url, options = {}) => {
@@ -77,7 +82,6 @@ export default function AdminPanel() {
       const sData = await sRes.json();
       setSessions(prev => {
           const newSessions = sData.sessions || [];
-          // Preserva status visual
           return newSessions.map(ns => {
               const old = prev.find(p => p.phone_number === ns.phone_number);
               return { ...ns, is_active: old ? old.is_active : ns.is_active };
@@ -85,22 +89,55 @@ export default function AdminPanel() {
       });
       const stRes = await authenticatedFetch('/api/stats');
       if (stRes.ok) setStats(await stRes.json());
-      
       const hRes = await authenticatedFetch('/api/get-harvested');
       const hData = await hRes.json();
       if(hData.harvestedIds) setHarvestedIds(new Set(hData.harvestedIds));
-
-    } catch (error) { console.error("Erro sync:", error); }
+    } catch (error) { console.error(error); }
   };
 
   const addLog = (text) => setLogs(prev => [`[${new Date().toLocaleTimeString()}] ${text}`, ...prev]);
 
-  // --- AUTH HANDLERS (Igual ao anterior) ---
-  const handleUserLogin = async (e) => { e.preventDefault(); /* ... lógica login user ... */ try { const res = await fetch('/api/login', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ username: usernameInput, password: passwordInput }) }); const data = await res.json(); if(data.success) { setAuthToken(data.token); setIsAuthenticated(true); localStorage.setItem('authToken', data.token); } else alert(data.error); } catch (e) {} };
-  const handleAdminTokenLogin = async (e) => { e.preventDefault(); /* ... lógica login admin ... */ try { const res = await fetch('/api/admin-login', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ password: adminTokenInput }) }); const data = await res.json(); if(data.success) { setAuthToken(data.token); setIsAdmin(true); setIsAuthenticated(true); localStorage.setItem('authToken', data.token); } else alert(data.error); } catch (e) {} };
+  // --- LOGIN HANDLERS ---
+  const handleUserLogin = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await fetch('/api/login', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ username: usernameInput, password: passwordInput }) });
+      const data = await res.json();
+      if(data.success) { setAuthToken(data.token); setIsAdmin(false); setIsAuthenticated(true); localStorage.setItem('authToken', data.token); } 
+      else alert(data.error);
+    } catch (e) { alert('Erro conexão'); }
+  };
+  const handleAdminTokenLogin = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await fetch('/api/admin-login', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ password: adminTokenInput }) });
+      const data = await res.json();
+      if(data.success) { setAuthToken(data.token); setIsAdmin(true); setIsAuthenticated(true); localStorage.setItem('authToken', data.token); } 
+      else alert(data.error);
+    } catch (e) { alert('Erro conexão'); }
+  };
   const handleLogout = () => { setIsAuthenticated(false); setAuthToken(''); localStorage.removeItem('authToken'); };
 
-  // --- SELEÇÃO ---
+  // --- GESTÃO SESSÕES ---
+  const checkAllStatus = async () => {
+      setCheckingStatus(true);
+      addLog('🔍 Checando status em lotes...');
+      // Faz em lotes de 5 para não travar
+      const chunk = 5;
+      const all = [...sessions];
+      for (let i = 0; i < all.length; i += chunk) {
+          await Promise.all(all.slice(i, i + chunk).map(async (s) => {
+              try {
+                  const res = await authenticatedFetch('/api/check-status', { method: 'POST', body: JSON.stringify({ phone: s.phone_number }) });
+                  const data = await res.json();
+                  s.is_active = (data.status === 'alive');
+              } catch(e){}
+          }));
+          setSessions([...all]); // Atualiza UI progressivamente
+      }
+      setCheckingStatus(false);
+      addLog('✅ Status verificado.');
+  };
   const toggleSelect = (phone) => {
     const newSet = new Set(selectedPhones);
     newSet.has(phone) ? newSet.delete(phone) : newSet.add(phone);
@@ -110,140 +147,120 @@ export default function AdminPanel() {
       const newSet = new Set();
       sessions.forEach(s => { if(s.is_active) newSet.add(s.phone_number) });
       setSelectedPhones(newSet);
+      addLog(`✅ ${newSet.size} contas online selecionadas.`);
   };
-  const checkAllStatus = async () => {
-      addLog('🔍 Check Status iniciado...');
-      for(let s of sessions) {
-          try {
-             const res = await authenticatedFetch('/api/check-status', { method: 'POST', body: JSON.stringify({ phone: s.phone_number }) });
+
+  // ==============================================================================
+  // MOTOR DE DISPARO OTIMIZADO (SEM TRAVAR LOGS)
+  // ==============================================================================
+  const startRealCampaign = async () => {
+     if (selectedPhones.size === 0) return alert('Selecione contas!');
+     setProcessing(true);
+     stopCampaignRef.current = false;
+     setProgress(0);
+     
+     // Configuração Otimizada para Navegador
+     const MAX_CONCURRENT = 6; // Máximo que navegadores aguentam bem por domínio
+     const BATCH_SIZE = Math.min(selectedPhones.size * 2, 50); // Ajusta carga dinâmica
+     
+     addLog(`🚀 Iniciando Motor (Random: ${useRandom ? 'ON' : 'OFF'})...`);
+     
+     let senders = Array.from(selectedPhones);
+     let totalSent = 0;
+
+     try {
+         while (!stopCampaignRef.current) {
+             // 1. Busca Leads
+             const res = await authenticatedFetch(`/api/get-campaign-leads?limit=${BATCH_SIZE}&random=${useRandom}`);
              const data = await res.json();
-             s.is_active = (data.status === 'alive');
-             setSessions([...sessions]);
-          } catch(e){}
-      }
-      addLog('✅ Check Status finalizado.');
+             const leads = data.leads || [];
+
+             if (leads.length === 0) {
+                 addLog('✅ Sem mais leads pendentes.');
+                 break;
+             }
+
+             // 2. Processa com limite de concorrência (Janela Deslizante)
+             // Isso impede que o React trave e os logs não apareçam
+             for (let i = 0; i < leads.length; i += MAX_CONCURRENT) {
+                 if (stopCampaignRef.current) break;
+                 
+                 const chunk = leads.slice(i, i + MAX_CONCURRENT);
+                 // Embaralha remetentes a cada micro-lote
+                 senders.sort(() => Math.random() - 0.5);
+
+                 await Promise.all(chunk.map(async (lead, idx) => {
+                     const sender = senders[idx % senders.length];
+                     try {
+                         const dRes = await authenticatedFetch('/api/dispatch', {
+                             method: 'POST',
+                             body: JSON.stringify({
+                                 senderPhone: sender,
+                                 target: lead.user_id,
+                                 username: lead.username,
+                                 originChatId: lead.chat_id,
+                                 message: msg,
+                                 imageUrl: imgUrl,
+                                 leadDbId: lead.id
+                             })
+                         });
+                         const d = await dRes.json();
+                         if(dRes.status === 429) addLog(`⏳ Flood em ${sender}`);
+                         else if(d.success) addLog(`✅ Enviado de ${sender} -> ${lead.username || lead.user_id}`);
+                     } catch(e) { /* fail silent */ }
+                 }));
+                 
+                 totalSent += chunk.length;
+                 // Pequeno delay para respirar a thread do navegador
+                 await new Promise(r => setTimeout(r, 800));
+             }
+         }
+         fetchData();
+     } catch (e) { addLog(`⛔ Erro: ${e.message}`); }
+     setProcessing(false);
   };
 
   // ==============================================================================
-  // ENGINE V8: WORKER POOL (NÃO TRAVA O NAVEGADOR)
+  // INBOX OTIMIZADO (CARREGAMENTO EM BLOCOS)
   // ==============================================================================
-
-  const startEngineV8 = async () => {
-    if (selectedPhones.size === 0) return alert('Selecione contas!');
-    
-    setProcessing(true);
-    stopCampaignRef.current = false;
-    addLog(`🚀 ENGINE V8 (Worker Pool) INICIADA - Random: ${useRandomLeads}`);
-
-    // CONFIGURAÇÃO DO WORKER
-    const MAX_CONCURRENT_WORKERS = 6; // Limite seguro do navegador
-    let activeWorkers = 0;
-    let leadsBuffer = [];
-    let totalSent = 0;
-    
-    // Lista de remetentes rotativa
-    let senders = Array.from(selectedPhones);
-
-    // Função para buscar leads
-    const fetchMoreLeads = async () => {
-        try {
-            const res = await authenticatedFetch(`/api/get-campaign-leads?limit=100&random=${useRandomLeads}`);
-            const data = await res.json();
-            return data.leads || [];
-        } catch (e) { return []; }
-    };
-
-    // Loop principal (Gerenciador de fila)
-    while (!stopCampaignRef.current) {
-        // 1. Reabastece buffer se estiver baixo
-        if (leadsBuffer.length < 10) {
-            addLog('📥 Buscando mais leads no banco...');
-            const newLeads = await fetchMoreLeads();
-            if (newLeads.length === 0) {
-                if (activeWorkers === 0) { addLog('✅ Sem mais leads. Fim.'); break; }
-                await new Promise(r => setTimeout(r, 2000)); // Espera workers terminarem
-                continue;
-            }
-            leadsBuffer = [...leadsBuffer, ...newLeads];
-            addLog(`📦 Buffer reabastecido: ${leadsBuffer.length} leads.`);
-        }
-
-        // 2. Se tiver espaço para workers e leads disponíveis, despacha
-        while (activeWorkers < MAX_CONCURRENT_WORKERS && leadsBuffer.length > 0 && !stopCampaignRef.current) {
-            const lead = leadsBuffer.shift();
-            const sender = senders[totalSent % senders.length]; // Round-robin simples
-            
-            activeWorkers++;
-            
-            // Dispara sem 'await' aqui (Fire and Forget controlado)
-            dispatchWorker(sender, lead).then(() => {
-                activeWorkers--;
-                totalSent++;
-            });
-        }
-
-        // Pequena pausa para não fritar a CPU do navegador no loop while
-        await new Promise(r => setTimeout(r, 100));
-    }
-    
-    setProcessing(false);
-  };
-
-  const dispatchWorker = async (sender, lead) => {
-      try {
-          const res = await authenticatedFetch('/api/dispatch', {
-              method: 'POST',
-              body: JSON.stringify({
-                  senderPhone: sender,
-                  target: lead.user_id,
-                  username: lead.username,
-                  originChatId: lead.chat_id,
-                  message: msg,
-                  imageUrl: imgUrl,
-                  leadDbId: lead.id
-              })
-          });
-          const d = await res.json();
-          if(d.success) addLog(`✅ Enviado de ${sender} para ${lead.username || lead.user_id}`);
-          else if(res.status === 429) addLog(`⏳ FloodWait em ${sender}`);
-          else addLog(`❌ Falha ${sender}: ${d.error}`);
-      } catch (e) {
-          addLog(`💀 Erro Req: ${e.message}`);
-      }
-  };
-
-
-  // ==============================================================================
-  // INBOX 2.0 (MÍDIA E LAYOUT)
-  // ==============================================================================
-  
   const loadInbox = async () => {
+      if (selectedPhones.size === 0) return alert('Selecione contas!');
       setLoadingReplies(true);
       setReplies([]);
+      
       const phones = Array.from(selectedPhones);
-      if(phones.length === 0) return alert('Selecione contas para ler o inbox!');
-      
-      addLog(`📩 Lendo inbox de ${phones.length} contas...`);
-      
-      let all = [];
-      // Batch loading
-      for (let i=0; i < phones.length; i += 5) {
-          const batch = phones.slice(i, i+5);
+      addLog(`📩 Baixando mensagens de ${phones.length} contas (Lote de 3)...`);
+
+      let allReplies = [];
+      const CHUNK_SIZE = 3; // Baixo para garantir velocidade e feedback visual
+
+      for (let i = 0; i < phones.length; i += CHUNK_SIZE) {
+          const batch = phones.slice(i, i + CHUNK_SIZE);
+          
           const results = await Promise.all(batch.map(p => 
               authenticatedFetch('/api/spy/check-replies', { method: 'POST', body: JSON.stringify({ phone: p }) })
-              .then(r => r.json()).catch(() => ({ replies: [] }))
+              .then(r => r.json())
+              .catch(() => ({ replies: [] }))
           ));
-          results.forEach(r => { if(r.replies) all = [...all, ...r.replies]; });
+
+          results.forEach(r => {
+              if (r.replies && r.replies.length > 0) {
+                  allReplies = [...allReplies, ...r.replies];
+              }
+          });
+          
+          // Ordena e atualiza a cada lote para o usuário ver chegando
+          setReplies(allReplies.sort((a,b) => b.timestamp - a.timestamp));
       }
       
-      setReplies(all.sort((a,b) => new Date(b.date) - new Date(a.date))); // Mais recentes primeiro
       setLoadingReplies(false);
-      setTab('inbox');
+      if(allReplies.length > 0) addLog(`📬 ${allReplies.length} mensagens encontradas.`);
+      else addLog('📭 Nenhuma mensagem nova.');
   };
 
   const openChat = async (reply) => {
       setSelectedChat(reply);
-      setLoadingChat(true);
+      setLoadingHistory(true);
       setChatHistory([]);
       try {
           const res = await authenticatedFetch('/api/spy/get-history', { 
@@ -252,288 +269,271 @@ export default function AdminPanel() {
           });
           const data = await res.json();
           setChatHistory(data.history || []);
-      } catch (e) { alert('Erro ao abrir chat'); }
-      setLoadingChat(false);
+      } catch (e) { alert('Erro ao carregar chat'); }
+      setLoadingHistory(false);
   };
 
   // ==============================================================================
-  // HARVEST & TOOLS (RESTAURADOS)
+  // RESTAURAÇÃO: SPY & TOOLS
   // ==============================================================================
-  
-  const scanGroups = async () => {
-      if(selectedPhones.size === 0) return alert('Selecione contas!');
+  const scanNetwork = async () => {
+      if (sessions.length === 0) return alert("Nenhuma conta.");
       setIsScanning(true);
-      addLog('📡 Escaneando grupos nas contas selecionadas...');
+      addLog('📡 Escaneando grupos...');
+      let groups = [], channels = [];
       
-      let found = [];
-      for(const phone of Array.from(selectedPhones)) {
+      for(const s of sessions) {
           try {
-              const res = await authenticatedFetch('/api/spy/list-chats', { method: 'POST', body: JSON.stringify({ phone }) });
+              const res = await authenticatedFetch('/api/spy/list-chats', { method: 'POST', body: JSON.stringify({ phone: s.phone_number }) });
               const data = await res.json();
               if(data.chats) {
                   data.chats.forEach(c => {
-                      if(!c.type.includes('Canal')) found.push({ ...c, ownerPhone: phone });
+                      const obj = { ...c, ownerPhone: s.phone_number };
+                      c.type.includes('Canal') ? channels.push(obj) : groups.push(obj);
                   });
               }
-          } catch(e) {}
+          } catch(e){}
       }
-      // Remove duplicatas por ID
-      found = [...new Map(found.map(item => [item.id, item])).values()].sort((a,b) => b.participantsCount - a.participantsCount);
-      setAllGroups(found);
-      localStorage.setItem('godModeGroups', JSON.stringify(found));
+      // Filtra duplicados e salva
+      const uGroups = [...new Map(groups.map(item => [item.id, item])).values()].sort((a,b) => b.participantsCount - a.participantsCount);
+      const uChannels = [...new Map(channels.map(item => [item.id, item])).values()].sort((a,b) => b.participantsCount - a.participantsCount);
+      
+      setAllGroups(uGroups);
+      setAllChannels(uChannels);
+      localStorage.setItem('godModeGroups', JSON.stringify(uGroups));
+      localStorage.setItem('godModeChannels', JSON.stringify(uChannels));
       setIsScanning(false);
-      addLog(`📡 Scan concluído. ${found.length} grupos encontrados.`);
+      addLog(`📡 Scan OK: ${uGroups.length} grupos.`);
   };
 
-  const autoHarvestAll = async () => {
-      const targets = allGroups.filter(g => !harvestedIds.has(g.id));
-      if(targets.length === 0) return alert('Nenhum grupo novo para aspirar. Faça SCAN.');
-      if(!confirm(`Aspirar ${targets.length} grupos?`)) return;
+  const startMassHarvest = async () => {
+      const targets = [...allGroups, ...allChannels].filter(c => !harvestedIds.has(c.id));
+      if (targets.length === 0) return alert("Nada novo para colher.");
+      if (!confirm(`Aspirar ${targets.length} grupos?`)) return;
 
-      addLog('🕷️ Iniciando Aspiração em Massa...');
-      for(const t of targets) {
-          addLog(`🕷️ Aspirando: ${t.title}...`);
+      setIsHarvestingAll(true);
+      stopHarvestRef.current = false;
+      addLog('🕷️ Aspirando...');
+
+      for (let i = 0; i < targets.length; i++) {
+          if (stopHarvestRef.current) break;
+          const t = targets[i];
           try {
-             const res = await authenticatedFetch('/api/spy/harvest', { 
-                 method: 'POST', 
-                 body: JSON.stringify({ phone: t.ownerPhone, chatId: t.id, chatName: t.title }) 
-             });
-             const d = await res.json();
-             if(d.success) {
-                 addLog(`✅ +${d.count} leads.`);
-                 setHarvestedIds(prev => new Set(prev).add(t.id));
-             }
-          } catch(e) {}
-          await new Promise(r => setTimeout(r, 2000)); // Delay segurança
+              const res = await authenticatedFetch('/api/spy/harvest', { 
+                  method: 'POST', 
+                  body: JSON.stringify({ phone: t.ownerPhone, chatId: t.id, chatName: t.title, isChannel: t.type.includes('Canal') })
+              });
+              const d = await res.json();
+              if(d.success) {
+                  addLog(`✅ +${d.count} leads de ${t.title}`);
+                  setHarvestedIds(prev => new Set(prev).add(t.id));
+              }
+          } catch(e){}
+          await new Promise(r => setTimeout(r, 2000));
       }
-      addLog('🏁 Aspiração finalizada.');
+      setIsHarvestingAll(false);
       fetchData();
   };
 
-  const massUpdateProfile = async () => {
-      if(selectedPhones.size === 0) return alert('Selecione contas!');
-      if(!newName && !photoUrl) return alert('Preencha nome ou foto');
-      addLog('🎭 Atualizando perfis...');
-      for(const p of Array.from(selectedPhones)) {
-          await authenticatedFetch('/api/update-profile', { method: 'POST', body: JSON.stringify({ phone: p, newName, photoUrl }) });
-          addLog(`🎭 Perfil atualizado: ${p}`);
-      }
+  const handleMassUpdateProfile = async () => {
+    if (selectedPhones.size === 0) return alert('Selecione contas!');
+    setProcessing(true);
+    addLog('🎭 Atualizando perfis...');
+    for (const phone of Array.from(selectedPhones)) {
+        await authenticatedFetch('/api/update-profile', { method: 'POST', body: JSON.stringify({ phone, newName, photoUrl }) });
+        addLog(`🎭 Atualizado: ${phone}`);
+    }
+    setProcessing(false); 
   };
 
-  const massPostStory = async () => {
-      if(selectedPhones.size === 0) return alert('Selecione contas!');
-      if(!storyUrl) return alert('Preencha URL da mídia');
-      addLog('📸 Postando Stories...');
-      for(const p of Array.from(selectedPhones)) {
-          await authenticatedFetch('/api/post-story', { method: 'POST', body: JSON.stringify({ phone: p, mediaUrl: storyUrl, caption: storyCaption }) });
-          addLog(`📸 Story postado: ${p}`);
+  const handleMassPostStory = async () => {
+      if (selectedPhones.size === 0) return alert('Selecione contas!');
+      setProcessing(true);
+      addLog('📸 Postando stories...');
+      for (const phone of Array.from(selectedPhones)) {
+          await authenticatedFetch('/api/post-story', { method: 'POST', body: JSON.stringify({ phone, mediaUrl: storyUrl, caption: storyCaption }) });
+          addLog(`📸 Story: ${phone}`);
       }
+      setProcessing(false); 
   };
 
-  // --- RENDER LOGIN ---
+  // --- RENDER ---
   if (!isAuthenticated) return (
-      <div style={{height:'100vh', background:'#000', display:'flex', alignItems:'center', justifyContent:'center', flexDirection:'column', gap:'10px'}}>
-           <div style={{display:'flex', gap:'10px'}}>
-              <button onClick={()=>setLoginMode('user')} style={{padding:'10px', background:loginMode==='user'?'#3390ec':'#222', color:'white', border:'none'}}>User</button>
-              <button onClick={()=>setLoginMode('admin')} style={{padding:'10px', background:loginMode==='admin'?'#8957e5':'#222', color:'white', border:'none'}}>Admin</button>
-           </div>
-           {loginMode==='user' ? 
-             <form onSubmit={handleUserLogin} style={{display:'flex', flexDirection:'column', gap:'10px'}}>
-                 <input placeholder="User" value={usernameInput} onChange={e=>setUsernameInput(e.target.value)} style={{padding:'10px'}}/>
-                 <input type="password" placeholder="Pass" value={passwordInput} onChange={e=>setPasswordInput(e.target.value)} style={{padding:'10px'}}/>
-                 <button type="submit" style={{padding:'10px', background:'#3390ec', color:'white', border:'none'}}>Login</button>
-             </form>
-           :
-             <form onSubmit={handleAdminTokenLogin} style={{display:'flex', flexDirection:'column', gap:'10px'}}>
-                 <input type="password" placeholder="Token" value={adminTokenInput} onChange={e=>setAdminTokenInput(e.target.value)} style={{padding:'10px'}}/>
-                 <button type="submit" style={{padding:'10px', background:'#8957e5', color:'white', border:'none'}}>Access</button>
-             </form>
-           }
+      <div style={{height:'100vh', background:'#000', display:'flex', alignItems:'center', justifyContent:'center', flexDirection:'column', gap:'20px'}}>
+          <div style={{display:'flex', gap:'10px'}}>
+              <button onClick={()=>setLoginMode('user')} style={{padding:'10px 20px', background:loginMode==='user'?'#3390ec':'transparent', color:'white', border:'1px solid #3390ec', borderRadius:'6px'}}>Usuário</button>
+              <button onClick={()=>setLoginMode('admin')} style={{padding:'10px 20px', background:loginMode==='admin'?'#8957e5':'transparent', color:'white', border:'1px solid #8957e5', borderRadius:'6px'}}>Admin</button>
+          </div>
+          {loginMode==='user' ? 
+            <form onSubmit={handleUserLogin} style={{background:'#1c242f', padding:'40px', borderRadius:'15px', border:'1px solid #3390ec'}}>
+                <input value={usernameInput} onChange={e=>setUsernameInput(e.target.value)} placeholder="User" style={{display:'block', marginBottom:'10px', padding:'10px', width:'200px'}}/>
+                <input type="password" value={passwordInput} onChange={e=>setPasswordInput(e.target.value)} placeholder="Pass" style={{display:'block', marginBottom:'10px', padding:'10px', width:'200px'}}/>
+                <button type="submit" style={{width:'100%', padding:'10px', background:'#3390ec', color:'white', border:'none', borderRadius:'5px'}}>Entrar</button>
+            </form>
+          :
+            <form onSubmit={handleAdminTokenLogin} style={{background:'#1c242f', padding:'40px', borderRadius:'15px', border:'1px solid #8957e5'}}>
+                <input type="password" value={adminTokenInput} onChange={e=>setAdminTokenInput(e.target.value)} placeholder="Token" style={{display:'block', marginBottom:'10px', padding:'10px', width:'200px'}}/>
+                <button type="submit" style={{width:'100%', padding:'10px', background:'#8957e5', color:'white', border:'none', borderRadius:'5px'}}>Acessar</button>
+            </form>
+          }
       </div>
   );
 
   return (
-    <div style={{ backgroundColor: '#0d1117', color: '#c9d1d9', minHeight: '100vh', display:'flex', flexDirection:'column', fontFamily: 'sans-serif' }}>
+    <div style={{ backgroundColor: '#0d1117', color: '#c9d1d9', minHeight: '100vh', padding: '20px', fontFamily: '-apple-system, sans-serif' }}>
         
-        {/* TOP BAR */}
-        <div style={{background:'#161b22', padding:'15px 25px', borderBottom:'1px solid #30363d', display:'flex', alignItems:'center', gap:'20px'}}>
-            <h2 style={{margin:0, color:'white'}}>HOTTRACK <span style={{fontSize:'12px', color:'#3390ec'}}>V8 ENGINE</span></h2>
-            
-            <button onClick={()=>setTab('dashboard')} style={{background:tab==='dashboard'?'#21262d':'transparent', color:tab==='dashboard'?'white':'#8b949e', border:'none', padding:'10px 15px', borderRadius:'6px', cursor:'pointer', fontWeight:'bold'}}>🚀 DASHBOARD</button>
-            <button onClick={()=>setTab('inbox')} style={{background:tab==='inbox'?'#21262d':'transparent', color:tab==='inbox'?'white':'#8b949e', border:'none', padding:'10px 15px', borderRadius:'6px', cursor:'pointer', fontWeight:'bold'}}>📬 INBOX</button>
-            <button onClick={()=>setTab('tools')} style={{background:tab==='tools'?'#21262d':'transparent', color:tab==='tools'?'white':'#8b949e', border:'none', padding:'10px 15px', borderRadius:'6px', cursor:'pointer', fontWeight:'bold'}}>🛠️ FERRAMENTAS & SPY</button>
-
-            <div style={{marginLeft:'auto', display:'flex', gap:'10px'}}>
-                <button onClick={handleLogout} style={{background:'#f85149', color:'white', border:'none', padding:'8px 15px', borderRadius:'6px', cursor:'pointer'}}>SAIR</button>
-            </div>
+        {/* MENU */}
+        <div style={{marginBottom:'25px', display:'flex', gap:'10px', borderBottom:'1px solid #30363d', paddingBottom:'15px', alignItems:'center'}}>
+            <h2 style={{margin:0, marginRight:'20px', color:'white'}}>HOTTRACK <span style={{fontSize:'12px', color:'#3390ec'}}>V9</span></h2>
+            <button onClick={()=>setTab('dashboard')} style={{padding:'10px 20px', background: tab==='dashboard'?'#238636':'transparent', color:'white', border:'1px solid #238636', borderRadius:'6px', fontWeight:'bold', cursor:'pointer'}}>🚀 DISPARO</button>
+            <button onClick={()=>setTab('inbox')} style={{padding:'10px 20px', background: tab==='inbox'?'#e3b341':'transparent', color:'white', border:'1px solid #e3b341', borderRadius:'6px', fontWeight:'bold', cursor:'pointer'}}>📬 INBOX ({replies.length})</button>
+            <button onClick={()=>setTab('spy')} style={{padding:'10px 20px', background: tab==='spy'?'#8957e5':'transparent', color:'white', border:'1px solid #8957e5', borderRadius:'6px', fontWeight:'bold', cursor:'pointer'}}>👁️ SPY</button>
+            <button onClick={()=>setTab('tools')} style={{padding:'10px 20px', background: tab==='tools'?'#1f6feb':'transparent', color:'white', border:'1px solid #1f6feb', borderRadius:'6px', fontWeight:'bold', cursor:'pointer'}}>🛠️ TOOLS</button>
+            <button onClick={handleLogout} style={{marginLeft:'auto', padding:'8px 15px', background:'#f85149', color:'white', border:'none', borderRadius:'6px', cursor:'pointer'}}>SAIR</button>
         </div>
 
-        <div style={{flex:1, padding:'25px', overflowY:'auto'}}>
-            
-            {/* ================= DASHBOARD ================= */}
-            {tab === 'dashboard' && (
-                <div style={{display:'grid', gridTemplateColumns:'2fr 1fr', gap:'25px'}}>
-                    <div>
-                        {/* CARD DISPARO */}
-                        <div style={{background:'#161b22', padding:'25px', borderRadius:'12px', border:'1px solid #30363d', marginBottom:'20px'}}>
-                            <h3 style={{marginTop:0, color:'white'}}>Configuração de Disparo</h3>
-                            
-                            <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'15px', marginBottom:'20px'}}>
-                                <input type="text" placeholder="URL da Imagem (Opcional)" value={imgUrl} onChange={e=>setImgUrl(e.target.value)} style={{background:'#0d1117', border:'1px solid #30363d', color:'white', padding:'12px', borderRadius:'6px'}} />
-                                <div style={{display:'flex', alignItems:'center', gap:'10px', background:'#0d1117', padding:'0 15px', borderRadius:'6px', border:'1px solid #30363d'}}>
-                                    <input type="checkbox" checked={useRandomLeads} onChange={e=>setUseRandomLeads(e.target.checked)} />
-                                    <span>Aleatorizar Leads (Anti-Padrão)</span>
-                                </div>
-                            </div>
-
-                            <textarea value={msg} onChange={e=>setMsg(e.target.value)} placeholder="Mensagem..." style={{width:'100%', height:'100px', background:'#0d1117', border:'1px solid #30363d', color:'white', padding:'12px', borderRadius:'6px', marginBottom:'20px'}} />
-
-                            <div style={{display:'flex', gap:'15px'}}>
-                                {!processing ? 
-                                    <button onClick={startEngineV8} style={{flex:1, padding:'15px', background:'#238636', color:'white', border:'none', borderRadius:'8px', fontWeight:'bold', fontSize:'16px', cursor:'pointer'}}>INICIAR DISPARO (V8)</button>
-                                :
-                                    <button onClick={()=>stopCampaignRef.current=true} style={{flex:1, padding:'15px', background:'#f85149', color:'white', border:'none', borderRadius:'8px', fontWeight:'bold', fontSize:'16px', cursor:'pointer'}}>PARAR DISPARO</button>
-                                }
-                            </div>
+        {/* DASHBOARD */}
+        {tab === 'dashboard' && (
+             <div style={{display:'grid', gridTemplateColumns:'1.5fr 1fr', gap:'25px'}}>
+                <div style={{background:'#161b22', padding:'25px', borderRadius:'12px', border:'1px solid #30363d'}}>
+                    <div style={{display:'flex', gap:'20px', marginBottom:'25px'}}>
+                        <div style={{flex:1, background:'#0d1117', border:'1px solid #d29922', padding:'20px', textAlign:'center', borderRadius:'10px'}}>
+                            <h2 style={{margin:0, color:'#d29922'}}>{stats.pending?.toLocaleString()}</h2><small>PENDENTES</small>
                         </div>
-
-                        {/* LOGS */}
-                        <div style={{background:'#0d1117', height:'300px', overflowY:'auto', padding:'15px', border:'1px solid #30363d', borderRadius:'12px', fontFamily:'monospace', fontSize:'12px'}}>
-                            {logs.length===0 && <div style={{color:'#8b949e', textAlign:'center', marginTop:'100px'}}>Logs aparecerão aqui...</div>}
-                            {logs.map((l,i)=><div key={i} style={{marginBottom:'5px', color:'#3fb950'}}>{l}</div>)}
+                        <div style={{flex:1, background:'#0d1117', border:'1px solid #238636', padding:'20px', textAlign:'center', borderRadius:'10px'}}>
+                            <h2 style={{margin:0, color:'#238636'}}>{stats.sent?.toLocaleString()}</h2><small>ENVIADOS</small>
                         </div>
                     </div>
-
-                    {/* SIDEBAR SESSIONS */}
-                    <div style={{background:'#161b22', padding:'20px', borderRadius:'12px', border:'1px solid #30363d', display:'flex', flexDirection:'column'}}>
-                        <div style={{display:'flex', justifyContent:'space-between', marginBottom:'15px'}}>
-                            <h3 style={{margin:0, color:'white'}}>Contas ({sessions.length})</h3>
-                            <button onClick={checkAllStatus} style={{background:'none', border:'1px solid #30363d', color:'#58a6ff', borderRadius:'4px', cursor:'pointer'}}>Check</button>
-                        </div>
-                        <button onClick={selectAllActive} style={{width:'100%', padding:'10px', background:'#21262d', color:'white', border:'none', borderRadius:'6px', marginBottom:'10px', cursor:'pointer'}}>Selecionar Online</button>
-                        
-                        <div style={{flex:1, overflowY:'auto'}}>
-                            {sessions.map(s => (
-                                <div key={s.id} onClick={()=>toggleSelect(s.phone_number)} style={{padding:'10px', display:'flex', alignItems:'center', gap:'10px', cursor:'pointer', background: selectedPhones.has(s.phone_number) ? 'rgba(88, 166, 255, 0.1)' : 'transparent', borderBottom:'1px solid #21262d'}}>
-                                    <div style={{width:'10px', height:'10px', borderRadius:'50%', background: s.is_active?'#238636':'#f85149'}}></div>
-                                    <span style={{color: s.is_active?'white':'#8b949e'}}>{s.phone_number}</span>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* ================= INBOX ================= */}
-            {tab === 'inbox' && (
-                <div style={{display:'grid', gridTemplateColumns:'350px 1fr', gap:'0', height:'calc(100vh - 120px)', border:'1px solid #30363d', borderRadius:'12px', overflow:'hidden'}}>
                     
-                    {/* LISTA DE CONVERSAS */}
-                    <div style={{background:'#161b22', borderRight:'1px solid #30363d', display:'flex', flexDirection:'column'}}>
-                        <div style={{padding:'15px', borderBottom:'1px solid #30363d', display:'flex', gap:'10px'}}>
-                            <button onClick={loadInbox} disabled={loadingReplies} style={{flex:1, padding:'10px', background:'#1f6feb', color:'white', border:'none', borderRadius:'6px', cursor:'pointer', fontWeight:'bold'}}>
-                                {loadingReplies ? 'Atualizando...' : '🔄 Atualizar Inbox'}
-                            </button>
-                        </div>
-                        <div style={{flex:1, overflowY:'auto'}}>
-                            {replies.map((r,i) => (
-                                <div key={i} onClick={()=>openChat(r)} style={{padding:'15px', borderBottom:'1px solid #21262d', cursor:'pointer', background: selectedChat?.chatId === r.chatId ? '#21262d' : 'transparent'}}>
-                                    <div style={{fontWeight:'bold', color:'white', marginBottom:'5px'}}>{r.name}</div>
-                                    <div style={{fontSize:'12px', color:'#8b949e', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{r.lastMessage || '[Mídia]'}</div>
-                                    <div style={{fontSize:'10px', color:'#58a6ff', marginTop:'5px', textAlign:'right'}}>{r.date}</div>
-                                </div>
-                            ))}
-                        </div>
+                    <h3 style={{color:'#3390ec'}}>Configurar Campanha</h3>
+                    <div style={{display:'flex', gap:'10px', marginBottom:'15px'}}>
+                        <input type="text" placeholder="URL Imagem (Opcional)" value={imgUrl} onChange={e=>setImgUrl(e.target.value)} style={{flex:1, padding:'14px', background:'#0d1117', color:'white', border:'1px solid #30363d', borderRadius:'8px'}} />
+                        <label style={{display:'flex', alignItems:'center', background:'#0d1117', padding:'0 15px', borderRadius:'8px', border:'1px solid #30363d', cursor:'pointer'}}>
+                            <input type="checkbox" checked={useRandom} onChange={e=>setUseRandom(e.target.checked)} style={{marginRight:'8px'}}/> Aleatório
+                        </label>
                     </div>
-
-                    {/* JANELA DE CHAT */}
-                    <div style={{background:'#0d1117', display:'flex', flexDirection:'column'}}>
-                        {!selectedChat ? (
-                            <div style={{flex:1, display:'flex', alignItems:'center', justifyContent:'center', color:'#8b949e'}}>Selecione uma conversa</div>
+                    
+                    <textarea value={msg} onChange={e=>setMsg(e.target.value)} placeholder="Mensagem..." style={{width:'100%', height:'120px', background:'#0d1117', color:'white', border:'1px solid #30363d', padding:'14px', borderRadius:'8px', marginBottom:'20px'}}/>
+                    
+                    <div style={{display:'flex', gap:'15px', marginBottom:'20px'}}>
+                        {!processing ? (
+                            <button onClick={startRealCampaign} style={{flex:1, padding:'20px', background:'#238636', color:'white', fontWeight:'bold', border:'none', borderRadius:'10px', cursor:'pointer'}}>INICIAR (MOTOR V9)</button>
                         ) : (
-                            <>
-                                <div style={{padding:'15px', background:'#161b22', borderBottom:'1px solid #30363d', color:'white', fontWeight:'bold'}}>
-                                    {selectedChat.name} <span style={{fontSize:'12px', fontWeight:'normal', color:'#8b949e'}}>({selectedChat.fromPhone})</span>
-                                </div>
-                                <div style={{flex:1, overflowY:'auto', padding:'20px', display:'flex', flexDirection:'column', gap:'15px'}}>
-                                    {loadingChat && <div style={{textAlign:'center', color:'#58a6ff'}}>Carregando histórico...</div>}
-                                    {chatHistory.map((m,i) => (
-                                        <div key={i} style={{alignSelf: m.isOut ? 'flex-end' : 'flex-start', background: m.isOut ? '#238636' : '#21262d', padding:'10px 15px', borderRadius:'12px', maxWidth:'70%', color:'white'}}>
-                                            {m.sender && !m.isOut && <div style={{fontSize:'11px', color:'#58a6ff', marginBottom:'5px'}}>{m.sender}</div>}
-                                            
-                                            {/* RENDERIZAÇÃO DE MÍDIA */}
-                                            {m.mediaType === 'image' && m.media && (
-                                                <img src={`data:image/jpeg;base64,${m.media}`} style={{maxWidth:'100%', borderRadius:'8px', marginBottom:'5px'}} />
-                                            )}
-                                            {m.mediaType === 'audio' && m.media && (
-                                                <audio controls src={`data:audio/ogg;base64,${m.media}`} style={{width:'100%', marginBottom:'5px'}} />
-                                            )}
-                                            {m.mediaType === 'video' && m.media && (
-                                                <video controls src={`data:video/mp4;base64,${m.media}`} style={{maxWidth:'100%', borderRadius:'8px', marginBottom:'5px'}} />
-                                            )}
-
-                                            <div>{m.text}</div>
-                                            <div style={{fontSize:'10px', opacity:0.6, textAlign:'right', marginTop:'5px'}}>{new Date(m.date * 1000).toLocaleTimeString()}</div>
-                                        </div>
-                                    ))}
-                                </div>
-                            </>
+                            <button onClick={()=>stopCampaignRef.current=true} style={{flex:1, padding:'20px', background:'#f85149', color:'white', fontWeight:'bold', border:'none', borderRadius:'10px', cursor:'pointer'}}>PARAR</button>
                         )}
                     </div>
-                </div>
-            )}
-
-            {/* ================= TOOLS & SPY ================= */}
-            {tab === 'tools' && (
-                <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'25px'}}>
                     
-                    {/* SPY / HARVEST */}
-                    <div style={{background:'#161b22', padding:'25px', borderRadius:'12px', border:'1px solid #30363d'}}>
-                        <h3 style={{marginTop:0, color:'#e3b341'}}>📡 Aspirador de Leads (Spy)</h3>
-                        <p style={{fontSize:'13px', color:'#8b949e'}}>1. Escaneie grupos das contas selecionadas. 2. Aspire todos os contatos.</p>
-                        
-                        <div style={{display:'flex', gap:'10px', marginBottom:'20px'}}>
-                            <button onClick={scanGroups} disabled={isScanning} style={{padding:'10px', background:'#21262d', color:'white', border:'1px solid #30363d', borderRadius:'6px', cursor:'pointer'}}>
-                                {isScanning ? 'Escaneando...' : '1. Escanear Grupos'}
-                            </button>
-                            <button onClick={autoHarvestAll} style={{padding:'10px', background:'#e3b341', color:'black', border:'none', borderRadius:'6px', cursor:'pointer', fontWeight:'bold'}}>
-                                2. ASPIRAR TUDO ({allGroups.length} grupos)
-                            </button>
-                        </div>
-                        
-                        <div style={{maxHeight:'300px', overflowY:'auto', background:'#0d1117', padding:'10px', borderRadius:'6px'}}>
-                            {allGroups.map((g,i) => (
-                                <div key={i} style={{padding:'8px', borderBottom:'1px solid #21262d', display:'flex', justifyContent:'space-between'}}>
+                    <div style={{height:'200px', overflowY:'auto', background:'#000', padding:'15px', fontSize:'12px', borderRadius:'8px', border:'1px solid #30363d', color:'#00ff00', fontFamily:'monospace'}}>
+                        {logs.map((l,i)=><div key={i}>{l}</div>)}
+                    </div>
+                </div>
+
+                <div style={{background:'#161b22', padding:'25px', borderRadius:'12px', border:'1px solid #30363d', display:'flex', flexDirection:'column'}}>
+                    <div style={{display:'flex', justifyContent:'space-between', marginBottom:'15px'}}>
+                        <h3 style={{margin:0}}>Contas ({sessions.length})</h3>
+                        <button onClick={checkAllStatus} style={{background:'#1f6feb', color:'white', border:'none', borderRadius:'6px', padding:'5px 10px', cursor:'pointer'}}>Check</button>
+                    </div>
+                    <button onClick={selectAllActive} style={{width:'100%', padding:'10px', background:'#30363d', color:'white', border:'none', borderRadius:'6px', marginBottom:'10px', cursor:'pointer'}}>Selecionar Online</button>
+                    <div style={{flex:1, maxHeight:'500px', overflowY:'auto'}}>
+                        {sessions.map(s => (
+                            <div key={s.id} onClick={()=>toggleSelect(s.phone_number)} style={{padding:'10px', marginBottom:'5px', borderRadius:'6px', display:'flex', alignItems:'center', gap:'10px', background: selectedPhones.has(s.phone_number) ? '#1f293a' : 'transparent', cursor:'pointer'}}>
+                                <div style={{width:'10px', height:'10px', borderRadius:'50%', background: s.is_active ? '#238636' : '#f85149'}}></div>
+                                <div>{s.phone_number}</div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+             </div>
+        )}
+
+        {/* INBOX */}
+        {tab === 'inbox' && (
+            <div style={{display:'grid', gridTemplateColumns:'350px 1fr', height:'calc(100vh - 120px)', border:'1px solid #30363d', borderRadius:'12px', overflow:'hidden', background:'#161b22'}}>
+                <div style={{borderRight:'1px solid #30363d', display:'flex', flexDirection:'column'}}>
+                    <div style={{padding:'15px', borderBottom:'1px solid #30363d'}}>
+                        <button onClick={loadInbox} disabled={loadingReplies} style={{width:'100%', padding:'12px', background:'#e3b341', color:'black', border:'none', borderRadius:'6px', fontWeight:'bold', cursor:'pointer'}}>
+                            {loadingReplies ? 'Baixando...' : '🔄 Atualizar Inbox'}
+                        </button>
+                    </div>
+                    <div style={{flex:1, overflowY:'auto'}}>
+                        {replies.map((r,i) => (
+                            <div key={i} onClick={()=>openChat(r)} style={{padding:'15px', borderBottom:'1px solid #21262d', cursor:'pointer', background: selectedChat?.chatId===r.chatId ? '#21262d' : 'transparent'}}>
+                                <div style={{fontWeight:'bold', color:'white', display:'flex', justifyContent:'space-between'}}>
+                                    <span>{r.name}</span>
+                                    <span style={{fontSize:'10px', color:'#8b949e'}}>{r.date}</span>
+                                </div>
+                                <div style={{fontSize:'12px', color:'#8b949e', marginTop:'5px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{r.lastMessage}</div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+                <div style={{display:'flex', flexDirection:'column', background:'#0d1117'}}>
+                    {selectedChat ? (
+                        <>
+                            <div style={{padding:'15px', background:'#161b22', borderBottom:'1px solid #30363d', color:'white', fontWeight:'bold'}}>{selectedChat.name} <small>({selectedChat.fromPhone})</small></div>
+                            <div style={{flex:1, overflowY:'auto', padding:'20px', display:'flex', flexDirection:'column', gap:'15px'}}>
+                                {loadingHistory && <div style={{textAlign:'center', color:'#3390ec'}}>Carregando...</div>}
+                                {chatHistory.map((m,i) => (
+                                    <div key={i} style={{alignSelf: m.isOut ? 'flex-end' : 'flex-start', background: m.isOut ? '#238636' : '#21262d', padding:'10px', borderRadius:'10px', maxWidth:'70%', color:'white'}}>
+                                        {m.media && m.mediaType === 'image' && <img src={`data:image/jpeg;base64,${m.media}`} style={{maxWidth:'100%', borderRadius:'8px', marginBottom:'5px'}}/>}
+                                        {m.media && m.mediaType === 'audio' && <audio controls src={`data:audio/ogg;base64,${m.media}`} style={{width:'100%'}}/>}
+                                        {m.media && (m.mediaType === 'video' || m.mediaType.includes('document')) && <video controls src={`data:video/mp4;base64,${m.media}`} style={{maxWidth:'100%', borderRadius:'8px'}}/>}
+                                        <div>{m.text}</div>
+                                        <div style={{fontSize:'10px', opacity:0.6, textAlign:'right', marginTop:'5px'}}>{new Date(m.date * 1000).toLocaleTimeString()}</div>
+                                    </div>
+                                ))}
+                            </div>
+                        </>
+                    ) : (
+                        <div style={{flex:1, display:'flex', alignItems:'center', justifyContent:'center', color:'#8b949e'}}>Selecione uma conversa</div>
+                    )}
+                </div>
+            </div>
+        )}
+
+        {/* SPY / GOD MODE */}
+        {tab === 'spy' && (
+            <div style={{background:'#161b22', padding:'25px', borderRadius:'12px', border:'1px solid #30363d'}}>
+                <div style={{display:'flex', justifyContent:'space-between', marginBottom:'20px'}}>
+                     <h2 style={{margin:0}}>Radar Global</h2>
+                     <div style={{display:'flex', gap:'10px'}}>
+                         <button onClick={scanNetwork} disabled={isScanning} style={{padding:'10px 20px', background:'#8957e5', color:'white', border:'none', borderRadius:'6px', cursor:'pointer'}}>1. Escanear ({allGroups.length})</button>
+                         <button onClick={startMassHarvest} style={{padding:'10px 20px', background:'#238636', color:'white', border:'none', borderRadius:'6px', cursor:'pointer'}}>2. Aspirar Todos</button>
+                     </div>
+                </div>
+                <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'20px'}}>
+                    <div style={{background:'#0d1117', padding:'15px', borderRadius:'8px'}}>
+                        <h4>Grupos Encontrados</h4>
+                        <div style={{maxHeight:'500px', overflowY:'auto'}}>
+                            {allGroups.map(g=>(
+                                <div key={g.id} style={{padding:'10px', borderBottom:'1px solid #21262d', display:'flex', justifyContent:'space-between'}}>
                                     <span>{g.title} ({g.participantsCount})</span>
-                                    {harvestedIds.has(g.id) && <span style={{color:'#238636'}}>✅</span>}
+                                    {harvestedIds.has(g.id) && <span>✅</span>}
                                 </div>
                             ))}
                         </div>
                     </div>
-
-                    {/* IDENTIDADE & STORIES */}
-                    <div style={{display:'flex', flexDirection:'column', gap:'20px'}}>
-                        {/* Identidade */}
-                        <div style={{background:'#161b22', padding:'25px', borderRadius:'12px', border:'1px solid #30363d'}}>
-                            <h3 style={{marginTop:0, color:'#8957e5'}}>🎭 Troca de Identidade</h3>
-                            <input placeholder="Novo Nome" value={newName} onChange={e=>setNewName(e.target.value)} style={{width:'100%', padding:'10px', marginBottom:'10px', background:'#0d1117', border:'1px solid #30363d', color:'white', borderRadius:'6px'}}/>
-                            <input placeholder="URL Foto" value={photoUrl} onChange={e=>setPhotoUrl(e.target.value)} style={{width:'100%', padding:'10px', marginBottom:'10px', background:'#0d1117', border:'1px solid #30363d', color:'white', borderRadius:'6px'}}/>
-                            <button onClick={massUpdateProfile} style={{width:'100%', padding:'10px', background:'#8957e5', color:'white', border:'none', borderRadius:'6px', cursor:'pointer'}}>Atualizar Selecionados</button>
-                        </div>
-
-                        {/* Stories */}
-                        <div style={{background:'#161b22', padding:'25px', borderRadius:'12px', border:'1px solid #30363d'}}>
-                            <h3 style={{marginTop:0, color:'#d29922'}}>📸 Postar Story</h3>
-                            <input placeholder="URL Mídia (JPG/MP4)" value={storyUrl} onChange={e=>setStoryUrl(e.target.value)} style={{width:'100%', padding:'10px', marginBottom:'10px', background:'#0d1117', border:'1px solid #30363d', color:'white', borderRadius:'6px'}}/>
-                            <input placeholder="Legenda" value={storyCaption} onChange={e=>setStoryCaption(e.target.value)} style={{width:'100%', padding:'10px', marginBottom:'10px', background:'#0d1117', border:'1px solid #30363d', color:'white', borderRadius:'6px'}}/>
-                            <button onClick={massPostStory} style={{width:'100%', padding:'10px', background:'#d29922', color:'white', border:'none', borderRadius:'6px', cursor:'pointer'}}>Postar em Selecionados</button>
-                        </div>
-                    </div>
-
                 </div>
-            )}
+            </div>
+        )}
 
-        </div>
+        {/* TOOLS */}
+        {tab === 'tools' && (
+             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'25px' }}>
+                <div style={{ backgroundColor: '#161b22', padding: '30px', borderRadius:'12px', border:'1px solid #30363d' }}>
+                    <h3 style={{marginTop:0, color:'#8957e5'}}>🎭 Camuflagem</h3>
+                    <input type="text" placeholder="Nome" value={newName} onChange={e => setNewName(e.target.value)} style={{ width: '100%', marginBottom: '10px', padding: '14px', background: '#0d1117', border: '1px solid #30363d', color: 'white', borderRadius:'8px' }} />
+                    <input type="text" placeholder="Foto URL" value={photoUrl} onChange={e => setPhotoUrl(e.target.value)} style={{ width: '100%', marginBottom: '20px', padding: '14px', background: '#0d1117', border: '1px solid #30363d', color: 'white', borderRadius:'8px' }} />
+                    <button onClick={handleMassUpdateProfile} disabled={processing} style={{ width: '100%', padding: '15px', background: '#8957e5', color: 'white', border: 'none', borderRadius:'8px', cursor:'pointer' }}>ATUALIZAR</button>
+                </div>
+                <div style={{ backgroundColor: '#161b22', padding: '30px', borderRadius:'12px', border:'1px solid #30363d' }}>
+                    <h3 style={{marginTop:0, color:'#3390ec'}}>📸 Stories</h3>
+                    <input type="text" placeholder="Mídia URL" value={storyUrl} onChange={e => setStoryUrl(e.target.value)} style={{ width: '100%', marginBottom: '10px', padding: '14px', background: '#0d1117', border: '1px solid #30363d', color: 'white', borderRadius:'8px' }} />
+                    <input type="text" placeholder="Legenda" value={storyCaption} onChange={e => setStoryCaption(e.target.value)} style={{ width: '100%', marginBottom: '20px', padding: '14px', background: '#0d1117', border: '1px solid #30363d', color: 'white', borderRadius:'8px' }} />
+                    <button onClick={handleMassPostStory} disabled={processing} style={{ width: '100%', padding: '15px', background: '#1f6feb', color: 'white', border: 'none', borderRadius:'8px', cursor:'pointer' }}>POSTAR</button>
+                </div>
+            </div>
+        )}
     </div>
   );
 }
