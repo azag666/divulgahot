@@ -9,24 +9,30 @@ const apiHash = process.env.TELEGRAM_API_HASH;
 
 export default async function handler(req, res) {
   await authenticate(req, res, async () => {
-    const { phone, chatId, limit = 20, offset = 0 } = req.body;
+    const { phone, chatId, limit = 30, offset = 0 } = req.body;
     
-    const { data: sessionData } = await supabase
+    // 1. Validar Sessão
+    const { data: sessionData, error } = await supabase
       .from('telegram_sessions')
       .select('session_string')
       .eq('phone_number', phone)
       .single();
 
-    if(!sessionData) return res.status(400).json({error: 'Sessão off'});
+    if (error || !sessionData) {
+        return res.status(400).json({ error: 'Sessão desconectada ou inválida.' });
+    }
 
     const client = new TelegramClient(new StringSession(sessionData.session_string), apiId, apiHash, { 
         connectionRetries: 1, useWSS: false 
     });
 
     try {
-        await client.connect();
-        
-        // Busca histórico com Offset (paginação)
+        // Timeout de conexão para não travar a API
+        const connectPromise = client.connect();
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout Conexão')), 10000));
+        await Promise.race([connectPromise, timeoutPromise]);
+
+        // Busca histórico
         const msgs = await client.getMessages(chatId, { 
             limit: parseInt(limit), 
             addOffset: parseInt(offset) 
@@ -38,47 +44,50 @@ export default async function handler(req, res) {
             let mediaData = null;
             let mediaType = null;
             
-            // Tratamento de Mídia
+            // Tenta baixar mídia com segurança
             if (m.media) {
                 try {
-                    // Identificação rápida do tipo
                     if (m.media.photo) mediaType = 'image';
                     else if (m.media.document) {
                          const mime = m.media.document.mimeType || '';
-                         if(mime.includes('audio') || mime.includes('voice')) mediaType = 'audio';
-                         else if(mime.includes('video')) mediaType = 'video';
+                         if(mime.includes('audio') || mime.includes('voice') || mime.includes('ogg')) mediaType = 'audio';
+                         else if(mime.includes('video') || mime.includes('mp4')) mediaType = 'video';
+                         else mediaType = 'file';
                     }
 
-                    // Baixa mídia pequena (thumbnails ou imagens leves)
-                    // Para vídeos grandes, ideal seria retornar apenas URL ou thumbnail, 
-                    // mas aqui tentamos baixar com limite de workers para não travar.
-                    const buffer = await client.downloadMedia(m, { workers: 1 });
+                    // Só baixa se for imagem ou áudio pequeno. Vídeo apenas se for leve.
+                    // Timeout de 3s para download de mídia
+                    const downloadPromise = client.downloadMedia(m, { workers: 1 });
+                    const mediaTimeout = new Promise(r => setTimeout(() => r(null), 3000)); 
+                    const buffer = await Promise.race([downloadPromise, mediaTimeout]);
+                    
                     if (buffer) {
                         mediaData = buffer.toString('base64');
                     }
                 } catch (err) {
-                    console.log('Erro ao baixar mídia (ignorado):', err.message);
+                    console.log(`Erro mídia msg ${m.id}:`, err.message);
                 }
             }
 
             history.push({
                 id: m.id,
                 text: m.message || '',
-                isOut: m.out, // true = eu enviei, false = lead enviou
+                isOut: m.out,
                 date: m.date,
                 media: mediaData,
                 mediaType: mediaType,
-                hasMedia: !!m.media
+                hasMedia: !!m.media // Flag para frontend saber que tinha mídia, mesmo se falhou download
             });
         }
 
         await client.disconnect();
         
-        // Retorna histórico REVERSO (mais antigas no topo, novas embaixo) para o chat
-        res.json({ history: history.reverse() });
+        // Retorna histórico
+        return res.status(200).json({ history: history.reverse() });
 
     } catch (e) {
-        res.status(500).json({ error: e.message });
+        console.error("Erro Get History:", e);
+        return res.status(500).json({ error: e.message || "Erro ao buscar mensagens" });
     }
   });
 }
