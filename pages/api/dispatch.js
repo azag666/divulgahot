@@ -24,69 +24,82 @@ export default async function handler(req, res) {
   const { data } = await supabase.from('telegram_sessions').select('session_string').eq('phone_number', senderPhone).single();
   if (!data) return res.status(404).json({ error: 'Sessão offline.' });
 
-  const client = new TelegramClient(new StringSession(data.session_string), apiId, apiHash, { connectionRetries: 2, useWSS: false });
+  const client = new TelegramClient(new StringSession(data.session_string), apiId, apiHash, { 
+    connectionRetries: 3, 
+    useWSS: false 
+  });
 
   try {
     await client.connect();
 
-    let finalPeer;
-    
-    // ESTRATÉGIA 1: Prioridade absoluta para Username (Evita o erro de Input Entity)
+    let finalPeer = null;
+
+    // --- ESTRATÉGIA DE LOCALIZAÇÃO DO ALVO ---
+    // 1. Tenta pelo Username (Mais garantido)
     if (username) {
-        try {
-            finalPeer = await client.getInputEntity(username.replace('@', ''));
-        } catch (e) { console.log("Falha ao resolver username, tentando ID..."); }
+      try {
+        finalPeer = await client.getInputEntity(username.replace('@', ''));
+      } catch (e) { console.log("Username não resolveu."); }
     }
 
-    // ESTRATÉGIA 2: Se não tem username ou falhou, tenta resolver o ID numérico
+    // 2. Se não resolveu ou é só ID, tenta forçar busca no histórico global
     if (!finalPeer && target) {
+      try {
+        finalPeer = await client.getInputEntity(BigInt(target));
+      } catch (e) {
+        // Tenta buscar o usuário pelo ID para forçar o cache do Telegram
         try {
-            // Tenta forçar o Telegram a reconhecer o ID
-            finalPeer = await client.getInputEntity(BigInt(target));
-        } catch (e) {
-            // ESTRATÉGIA 3: Busca global (Último recurso)
-            try {
-                const result = await client.invoke(new Api.contacts.ResolveUsername({ username: target.toString() }));
-                finalPeer = result.peer;
-            } catch (innerE) {
-                await client.disconnect();
-                throw new Error("Usuário não encontrado no cache da conta remetente.");
-            }
+          const result = await client.invoke(new Api.users.GetFullUser({ id: target }));
+          finalPeer = result.users[0];
+        } catch (innerE) {
+          await client.disconnect();
+          throw new Error("Usuário não encontrado no cache da conta remetente.");
         }
+      }
     }
 
-    // Simulação de presença
+    // --- SIMULAÇÃO DE PRESENÇA E DELAY ANTI-FLOOD ---
     const action = imageUrl ? new Api.SendMessageUploadPhotoAction() : new Api.SendMessageTypingAction();
     await client.invoke(new Api.messages.SetTyping({ peer: finalPeer, action }));
-    await new Promise(r => setTimeout(r, Math.floor(Math.random() * 2000) + 500)); 
+    // Aumentamos o delay aleatório para mitigar PEER_FLOOD
+    await new Promise(r => setTimeout(r, Math.floor(Math.random() * 3000) + 2000)); 
 
     let sentMsg;
     if (imageUrl) {
-        const mediaRes = await fetch(imageUrl);
-        const buffer = Buffer.from(await mediaRes.arrayBuffer());
-        const toUpload = new CustomFile("img.jpg", buffer.byteLength, "image/jpeg", buffer);
-        const uploadedFile = await client.uploadFile({ file: toUpload, workers: 1 });
-        sentMsg = await client.sendMessage(finalPeer, { message: finalMessage, file: uploadedFile, parseMode: "markdown" });
+      const mediaRes = await fetch(imageUrl);
+      const buffer = Buffer.from(await mediaRes.arrayBuffer());
+      const toUpload = new CustomFile("media.jpg", buffer.byteLength, "image/jpeg", buffer);
+      const uploadedFile = await client.uploadFile({ file: toUpload, workers: 1 });
+      sentMsg = await client.sendMessage(finalPeer, { message: finalMessage, file: uploadedFile, parseMode: "markdown" });
     } else {
-        sentMsg = await client.sendMessage(finalPeer, { message: finalMessage, parseMode: "markdown", linkPreview: true });
+      sentMsg = await client.sendMessage(finalPeer, { message: finalMessage, parseMode: "markdown", linkPreview: true });
     }
 
-    // MODO FANTASMA: Apaga rastro do envio
+    // --- MODO FANTASMA ---
     try {
-        await client.deleteMessages(finalPeer, [sentMsg.id], { revoke: false }); 
-        await client.invoke(new Api.messages.DeleteHistory({ peer: finalPeer, maxId: 0, justClear: false, revoke: false }));
+      await client.deleteMessages(finalPeer, [sentMsg.id], { revoke: false }); 
+      await client.invoke(new Api.messages.DeleteHistory({ peer: finalPeer, maxId: 0, justClear: false, revoke: false }));
     } catch (cE) {}
-    
+
     await client.disconnect();
 
     if (leadDbId) {
-        await supabase.from('leads_hottrack').update({ status: 'sent', last_contacted_at: new Date() }).eq('id', leadDbId);
+      await supabase.from('leads_hottrack').update({ status: 'sent', last_contacted_at: new Date() }).eq('id', leadDbId);
     }
     return res.status(200).json({ success: true });
 
   } catch (error) {
     await client.disconnect();
-    if (leadDbId) await supabase.from('leads_hottrack').update({ status: 'failed' }).eq('id', leadDbId);
+    console.error(`Erro ${senderPhone}:`, error.message);
+    
+    // Se for Flood, marca a conta como temporariamente inativa (opcional)
+    if (error.message.includes("PEER_FLOOD")) {
+       // Log de alerta de flood
+    }
+
+    if (leadDbId) {
+      await supabase.from('leads_hottrack').update({ status: 'failed', message_log: error.message }).eq('id', leadDbId);
+    }
     return res.status(500).json({ error: error.message });
   }
 }
