@@ -21,56 +21,64 @@ export default async function handler(req, res) {
     if (!sessionData) return res.status(404).json({ error: 'Sessão não encontrada' });
 
     const client = new TelegramClient(new StringSession(sessionData.session_string), apiId, apiHash, {
-      connectionRetries: 5,
-      useWSS: false, 
+      connectionRetries: 1, useWSS: false, 
     });
     
     await client.connect();
 
-    // Limite aumentado para pegar mais grupos
-    const dialogs = await client.getDialogs({ limit: 40 });
+    // Pega os últimos 60 chats
+    const dialogs = await client.getDialogs({ limit: 60 });
     
     const chats = [];
 
-    // Processa cada chat para pegar FOTO e MEMBROS
     for (const d of dialogs) {
         if (d.isGroup || d.isChannel) {
             let photoBase64 = null;
             let memberCount = 0;
+            
+            // --- CORREÇÃO CRÍTICA AQUI ---
+            // O Telegram chama Supergrupos de 'Channel', mas com flag 'megagroup'
+            // Se for broadcast = true, é CANAL (só posta).
+            // Se for megagroup = true, é GRUPO (pode roubar).
+            const isBroadcastChannel = d.entity.broadcast === true;
+            const isSuperGroup = d.entity.megagroup === true;
+            
+            // Define o tipo corretamente
+            let finalType = 'Grupo'; // Padrão
+            if (isBroadcastChannel) finalType = 'Canal';
+            if (isSuperGroup) finalType = 'Grupo'; // Força Supergrupo a ser Grupo
 
             try {
-                // 1. Tenta pegar a contagem de membros
-                // Em canais/supergrupos fica em 'participantsCount'. Em chats pequenos pode variar.
                 memberCount = d.entity.participantsCount || d.entity.participants?.length || 0;
                 
-                // 2. Baixa a FOTO do perfil (versão pequena para ser rápido)
+                // Baixa foto pequena (thumbnail)
                 const buffer = await client.downloadProfilePhoto(d.entity, { isBig: false });
                 if (buffer && buffer.length > 0) {
                     photoBase64 = `data:image/jpeg;base64,${buffer.toString('base64')}`;
                 }
             } catch (e) {
-                console.error("Erro ao processar chat:", d.title, e.message);
+                console.log("Erro leve ao ler chat:", d.title);
             }
 
             chats.push({
                 id: d.id.toString(),
                 title: d.title,
-                type: d.isChannel ? 'Canal' : 'Grupo',
-                participantsCount: memberCount, // Quantidade de Leads
-                photo: photoBase64 // Imagem visual
+                type: finalType, // Agora vai vir certo
+                participantsCount: memberCount, 
+                photo: photoBase64
             });
         }
     }
 
     await client.disconnect();
     
-    // Ordena por quantidade de membros (os maiores primeiro)
+    // Ordena por tamanho
     chats.sort((a, b) => b.participantsCount - a.participantsCount);
 
     res.status(200).json({ chats });
 
   } catch (error) {
-    console.error("Erro geral:", error);
+    console.error("Erro list-chats:", error);
     res.status(500).json({ error: error.message });
   }
 }
