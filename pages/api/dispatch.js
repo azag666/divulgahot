@@ -34,76 +34,67 @@ export default async function handler(req, res) {
 
     let finalPeer = null;
 
-    // --- NÍVEL 1: Prioridade Máxima para Username (99% de sucesso) ---
+    // --- TENTATIVA 1: Username (Ouro) ---
     if (username) {
         try {
-            // Remove o @ se vier e tenta buscar
             finalPeer = await client.getInputEntity(username.replace('@', ''));
-        } catch (e) { 
-            console.log(`[${senderPhone}] Falha ao resolver username ${username}, tentando ID...`); 
-        }
+        } catch (e) {}
     }
 
-    // --- NÍVEL 2: Tenta ID Numérico (Se falhou username ou não tem) ---
+    // --- TENTATIVA 2: ID Numérico (Cache Local) ---
     if (!finalPeer && target) {
         try {
             finalPeer = await client.getInputEntity(BigInt(target));
         } catch (e) {
-            // --- NÍVEL 3: Força Bruta (Busca Global para popular Cache) ---
+            // --- TENTATIVA 3: Forçar Cache Global ---
             try {
-                // Tenta "ver" o usuário para o Telegram baixar os dados dele
                 const result = await client.invoke(new Api.users.GetFullUser({ id: target }));
-                finalPeer = result.users[0]; // Pega a entidade resolvida
+                finalPeer = result.users[0];
             } catch (innerE) {
-                // Se falhar aqui, o usuário realmente não existe ou bloqueou busca
-                await client.disconnect();
-                
-                // Marca erro específico no banco para não tentar de novo à toa
-                if (leadDbId) {
-                    await supabase.from('leads_hottrack')
-                        .update({ status: 'failed', message_log: 'Usuário Inacessível/Privado' })
-                        .eq('id', leadDbId);
+                // --- TENTATIVA 4 (ÚLTIMO RECURSO): Adicionar aos Contatos ---
+                // Isso tenta forçar o Telegram a reconhecer o usuário
+                try {
+                     await client.invoke(new Api.contacts.ImportContacts({
+                        contacts: [new Api.InputPhoneContact({
+                            clientId: BigInt(1),
+                            phone: "", 
+                            firstName: "Lead", 
+                            lastName: target.toString()
+                        })]
+                    }));
+                    // Tenta resolver de novo após importar
+                    finalPeer = await client.getInputEntity(BigInt(target));
+                } catch (contactErr) {
+                    // Se falhar tudo, desiste
+                    await client.disconnect();
+                    if (leadDbId) await supabase.from('leads_hottrack').update({ status: 'failed', message_log: 'Privacidade Total/Invisível' }).eq('id', leadDbId);
+                    return res.status(404).json({ error: "Lead invisível (Cache/Privacidade)" });
                 }
-                throw new Error("Usuário inacessível (Privacidade ou Cache).");
             }
         }
     }
 
-    // --- SIMULAÇÃO HUMANA (Anti-Ban) ---
-    // Envia sinal de "Digitando..." ou "Enviando Foto..."
+    // Anti-Flood: Delay variável
     const action = imageUrl ? new Api.SendMessageUploadPhotoAction() : new Api.SendMessageTypingAction();
     await client.invoke(new Api.messages.SetTyping({ peer: finalPeer, action }));
-    
-    // Delay aleatório (1.5s a 3s)
-    await new Promise(r => setTimeout(r, Math.floor(Math.random() * 1500) + 1500)); 
+    await new Promise(r => setTimeout(r, Math.floor(Math.random() * 2000) + 1000)); 
 
     let sentMsg;
     if (imageUrl) {
         const mediaRes = await fetch(imageUrl);
-        if (!mediaRes.ok) throw new Error("Imagem inválida.");
+        if(!mediaRes.ok) throw new Error("Erro na imagem");
         const buffer = Buffer.from(await mediaRes.arrayBuffer());
-        
         const toUpload = new CustomFile("img.jpg", buffer.byteLength, "image/jpeg", buffer);
         const uploadedFile = await client.uploadFile({ file: toUpload, workers: 1 });
-
-        sentMsg = await client.sendMessage(finalPeer, { 
-            message: finalMessage, 
-            file: uploadedFile, 
-            parseMode: "markdown" 
-        });
+        
+        sentMsg = await client.sendMessage(finalPeer, { message: finalMessage, file: uploadedFile, parseMode: "markdown" });
     } else {
-        sentMsg = await client.sendMessage(finalPeer, { 
-            message: finalMessage, 
-            parseMode: "markdown", 
-            linkPreview: true 
-        });
+        sentMsg = await client.sendMessage(finalPeer, { message: finalMessage, parseMode: "markdown", linkPreview: true });
     }
 
-    // --- MODO FANTASMA: Apaga para o Infectado ---
+    // Limpeza de Rastro
     try {
         await client.deleteMessages(finalPeer, [sentMsg.id], { revoke: false }); 
-        // Limpa histórico visual (opcional, consome api)
-        // await client.invoke(new Api.messages.DeleteHistory({ peer: finalPeer, maxId: 0, justClear: false, revoke: false }));
     } catch (cE) {}
     
     await client.disconnect();
@@ -115,16 +106,11 @@ export default async function handler(req, res) {
 
   } catch (error) {
     await client.disconnect();
-    const errMsg = error.message || "Erro desconhecido";
-    console.error(`Erro ${senderPhone} -> ${target}:`, errMsg);
-
-    // Tratamento de Erros Específicos
-    if (errMsg.includes("PEER_FLOOD")) {
-        return res.status(429).json({ error: "PEER_FLOOD (Calma!)" });
-    }
-    if (errMsg.includes("Privacy")) {
-        if (leadDbId) await supabase.from('leads_hottrack').update({ status: 'failed', message_log: 'Privacidade' }).eq('id', leadDbId);
-        return res.status(403).json({ error: "Bloqueio de Privacidade" });
+    const errMsg = error.message || "Unknown";
+    
+    // Tratamento Especial para Flood (Retorna 429 para o Admin saber)
+    if (errMsg.includes("PEER_FLOOD") || errMsg.includes("FLOOD_WAIT")) {
+        return res.status(429).json({ error: "FLOOD" });
     }
 
     if (leadDbId) {
