@@ -11,28 +11,30 @@ export default async function handler(req, res) {
   await authenticate(req, res, async () => {
     const { phone, chatId, limit = 30, offset = 0 } = req.body;
     
-    // 1. Validar Sessão
-    const { data: sessionData, error } = await supabase
+    const { data: sessionData } = await supabase
       .from('telegram_sessions')
       .select('session_string')
       .eq('phone_number', phone)
       .single();
 
-    if (error || !sessionData) {
-        return res.status(400).json({ error: 'Sessão desconectada ou inválida.' });
-    }
+    if(!sessionData) return res.status(400).json({error: 'Sessão desconectada.'});
 
     const client = new TelegramClient(new StringSession(sessionData.session_string), apiId, apiHash, { 
         connectionRetries: 1, useWSS: false 
     });
 
     try {
-        // Timeout de conexão para não travar a API
-        const connectPromise = client.connect();
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout Conexão')), 10000));
-        await Promise.race([connectPromise, timeoutPromise]);
-
-        // Busca histórico
+        await client.connect();
+        
+        // --- CORREÇÃO DO ERRO "INPUT ENTITY NOT FOUND" ---
+        // O GramJS precisa "ver" os chats antes de interagir com eles pelo ID.
+        // Carregamos os últimos 50 diálogos para popular o cache interno de entidades.
+        await client.getDialogs({ limit: 50 });
+        
+        // Se o chat for muito antigo e não estiver nos 50, tentamos buscar especificamente
+        // Mas para "infectados" respondendo, o getDialogs acima resolve 99% dos casos.
+        
+        // Agora busca as mensagens com segurança
         const msgs = await client.getMessages(chatId, { 
             limit: parseInt(limit), 
             addOffset: parseInt(offset) 
@@ -44,7 +46,7 @@ export default async function handler(req, res) {
             let mediaData = null;
             let mediaType = null;
             
-            // Tenta baixar mídia com segurança
+            // Tratamento Seguro de Mídia (com timeout para não travar)
             if (m.media) {
                 try {
                     if (m.media.photo) mediaType = 'image';
@@ -55,17 +57,18 @@ export default async function handler(req, res) {
                          else mediaType = 'file';
                     }
 
-                    // Só baixa se for imagem ou áudio pequeno. Vídeo apenas se for leve.
-                    // Timeout de 3s para download de mídia
+                    // Tenta baixar apenas se for imagem ou audio pequeno
+                    // Vídeos grandes podem demorar, então definimos um timeout
                     const downloadPromise = client.downloadMedia(m, { workers: 1 });
-                    const mediaTimeout = new Promise(r => setTimeout(() => r(null), 3000)); 
-                    const buffer = await Promise.race([downloadPromise, mediaTimeout]);
+                    const timeoutPromise = new Promise(r => setTimeout(r, 4000)); // 4s timeout
                     
-                    if (buffer) {
+                    const buffer = await Promise.race([downloadPromise, timeoutPromise]);
+                    
+                    if (buffer && Buffer.isBuffer(buffer)) {
                         mediaData = buffer.toString('base64');
                     }
                 } catch (err) {
-                    console.log(`Erro mídia msg ${m.id}:`, err.message);
+                    console.log('Erro mídia ignorado:', err.message);
                 }
             }
 
@@ -76,18 +79,17 @@ export default async function handler(req, res) {
                 date: m.date,
                 media: mediaData,
                 mediaType: mediaType,
-                hasMedia: !!m.media // Flag para frontend saber que tinha mídia, mesmo se falhou download
+                hasMedia: !!m.media
             });
         }
 
         await client.disconnect();
-        
-        // Retorna histórico
-        return res.status(200).json({ history: history.reverse() });
+        res.json({ history: history.reverse() });
 
     } catch (e) {
         console.error("Erro Get History:", e);
-        return res.status(500).json({ error: e.message || "Erro ao buscar mensagens" });
+        // Retorna erro 500 mas com mensagem clara
+        res.status(500).json({ error: e.message || "Erro ao buscar histórico." });
     }
   });
 }
