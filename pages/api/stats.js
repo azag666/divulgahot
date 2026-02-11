@@ -1,33 +1,23 @@
 import { createClient } from '@supabase/supabase-js';
-
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
 export default async function handler(req, res) {
+  const { ownerId } = req.query;
+
   try {
-    // 1. Conta TOTAL de leads na tabela nova
-    const { count: total, error: err1 } = await supabase
-      .from('leads_hottrack') // <--- NOME NOVO
-      .select('*', { count: 'exact', head: true });
+    // Função auxiliar para contar com filtro de dono
+    const getCount = async (status) => {
+        let q = supabase.from('leads_hottrack').select('*', { count: 'exact', head: true });
+        if (status) q = q.eq('status', status);
+        if (ownerId) q = q.eq('owner_id', ownerId);
+        const { count } = await q;
+        return count || 0;
+    };
 
-    if (err1) throw err1;
+    const total = await getCount();
+    const pending = await getCount('pending');
+    const sent = await getCount('sent');
 
-    // 2. Conta PENDENTES (status = 'pending')
-    const { count: pending } = await supabase
-      .from('leads_hottrack')
-      .select('*', { count: 'exact', head: true })
-      .eq('status', 'pending');
-
-    // 3. Conta ENVIADOS (status = 'sent')
-    const { count: sent } = await supabase
-      .from('leads_hottrack')
-      .select('*', { count: 'exact', head: true })
-      .eq('status', 'sent');
-
-    res.status(200).json({ total: total || 0, pending: pending || 0, sent: sent || 0 });
-
-  } catch (error) {
-    console.error("Erro ao carregar stats:", error.message);
-    // Retorna zeros para não quebrar o painel se a tabela não existir
-    res.status(200).json({ total: 0, pending: 0, sent: 0 });
-  }
+    res.status(200).json({ total, pending, sent });
+  } catch (error) { res.status(500).json({ total:0, pending:0, sent:0 }); }
 }
