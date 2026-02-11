@@ -9,26 +9,27 @@ const apiHash = process.env.TELEGRAM_API_HASH;
 
 export default async function handler(req, res) {
   await authenticate(req, res, async () => {
-    const { phone, chatId } = req.body;
+    const { phone, chatId, limit } = req.body;
     
+    // Busca sessão
     const { data: sessionData } = await supabase
       .from('telegram_sessions')
-      .select('session_string, owner_id')
+      .select('session_string')
       .eq('phone_number', phone)
       .single();
     
-    if(!sessionData) return res.status(400).json({error: 'Sessão não encontrada'});
+    if(!sessionData) return res.status(400).json({error: 'Conta offline'});
 
-    // Validação de dono removida temporariamente para admin total, ou mantenha se preferir
-    // if (!req.isAdmin && req.userId && sessionData.owner_id !== req.userId) ...
-
-    const client = new TelegramClient(new StringSession(sessionData.session_string), apiId, apiHash, { connectionRetries: 1, useWSS: false });
+    const client = new TelegramClient(new StringSession(sessionData.session_string), apiId, apiHash, { 
+        connectionRetries: 1, useWSS: false 
+    });
 
     try {
         await client.connect();
         
-        // Pega histórico maior (30 msgs)
-        const msgs = await client.getMessages(chatId, { limit: 30 });
+        // Pega histórico (Padrão 50 msgs para ser "completo" mas rápido)
+        // Se precisar de mais, aumente o limit, mas ficará mais lento.
+        const msgs = await client.getMessages(chatId, { limit: parseInt(limit) || 50 });
         
         const history = [];
 
@@ -38,22 +39,22 @@ export default async function handler(req, res) {
 
             if (m.media) {
                 try {
-                    // Tenta identificar o tipo
+                    // Identifica o tipo
                     if (m.media.photo) mediaType = 'image';
                     else if (m.media.document) {
                         const mime = m.media.document.mimeType;
-                        if (mime.includes('audio') || mime.includes('voice')) mediaType = 'audio';
-                        else if (mime.includes('video')) mediaType = 'video';
-                        else mediaType = 'file';
+                        if (mime.includes('audio') || mime.includes('voice') || mime.includes('ogg')) mediaType = 'audio';
+                        else if (mime.includes('video') || mime.includes('mp4')) mediaType = 'video';
                     }
 
-                    // Baixa a mídia (Buffer)
+                    // Baixa a mídia (Buffer) -> Base64
+                    // OBS: Videos grandes podem demorar. O limite padrão do buffer é 10MB.
                     const buffer = await client.downloadMedia(m, { workers: 1 });
                     if (buffer) {
                         mediaData = buffer.toString('base64');
                     }
                 } catch (err) {
-                    console.log('Erro ao baixar mídia:', err.message);
+                    console.log('Erro mídia:', err.message);
                 }
             }
 
@@ -64,12 +65,13 @@ export default async function handler(req, res) {
                 isOut: m.out,
                 date: m.date,
                 media: mediaData,
-                mediaType: mediaType, // 'image', 'audio', 'video', 'file'
+                mediaType: mediaType, 
                 hasMedia: !!m.media
             });
         }
 
         await client.disconnect();
+        // Retorna na ordem cronológica (antiga -> nova)
         res.json({ history: history.reverse() });
 
     } catch (e) {
