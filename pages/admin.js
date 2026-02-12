@@ -9,18 +9,6 @@ export default function AdminPanel() {
   const [adminTokenInput, setAdminTokenInput] = useState('');
   const [authToken, setAuthToken] = useState('');
   const [isAdmin, setIsAdmin] = useState(false);
-
-  // --- CONFIG DO USUÁRIO (REDIRECT/PRESSEL) ---
-  const [myRedirectUrl, setMyRedirectUrl] = useState('');
-  const [savingRedirect, setSavingRedirect] = useState(false);
-
-  // --- GESTÃO DE USERS (ADMIN) ---
-  const [newUserUsername, setNewUserUsername] = useState('');
-  const [newUserPassword, setNewUserPassword] = useState('');
-  const [newUserRedirectUrl, setNewUserRedirectUrl] = useState('');
-  const [creatingUser, setCreatingUser] = useState(false);
-  const [createdUser, setCreatedUser] = useState(null);
-  const [usersList, setUsersList] = useState([]);
   
   // --- NAVEGAÇÃO ---
   const [tab, setTab] = useState('dashboard'); 
@@ -109,36 +97,6 @@ export default function AdminPanel() {
         fetchData();
     }
   }, [isAuthenticated, authToken]);
-
-  useEffect(() => {
-    if (!isAuthenticated || !authToken) return;
-
-    const run = async () => {
-      // Carrega o redirect_url do próprio user
-      if (!isAdmin) {
-        try {
-          const res = await authenticatedFetch('/api/user/update-redirect', { method: 'GET' });
-          const data = await res.json();
-          if (res.ok && data?.success) {
-            setMyRedirectUrl(data.redirect_url || '');
-          }
-        } catch (e) {}
-      }
-
-      // Admin: lista usuários
-      if (isAdmin) {
-        try {
-          const res = await authenticatedFetch('/api/admin/list-users', { method: 'GET' });
-          const data = await res.json();
-          if (res.ok && data?.success) {
-            setUsersList(data.users || []);
-          }
-        } catch (e) {}
-      }
-    };
-
-    run();
-  }, [isAuthenticated, authToken, isAdmin]);
 
   // Função helper para fazer requisições autenticadas
   const authenticatedFetch = async (url, options = {}) => {
@@ -247,67 +205,7 @@ export default function AdminPanel() {
     setIsAuthenticated(false);
     setAuthToken('');
     setIsAdmin(false);
-    setCreatedUser(null);
     localStorage.removeItem('authToken');
-  };
-
-  const handleSaveRedirectUrl = async () => {
-    setSavingRedirect(true);
-    try {
-      const res = await authenticatedFetch('/api/user/update-redirect', {
-        method: 'POST',
-        body: JSON.stringify({ redirectUrl: myRedirectUrl })
-      });
-      const data = await res.json();
-      if (res.ok && data?.success) {
-        setMyRedirectUrl(data.redirect_url || '');
-        addLog('✅ Redirect/Pressel atualizado.');
-      } else {
-        alert(data?.error || 'Falha ao salvar redirect.');
-      }
-    } catch (e) {
-      alert('Erro de conexão ao salvar redirect.');
-    }
-    setSavingRedirect(false);
-  };
-
-  const handleCreateUser = async () => {
-    if (!newUserUsername || !newUserPassword) {
-      alert('Informe username e senha do novo usuário.');
-      return;
-    }
-    setCreatingUser(true);
-    setCreatedUser(null);
-    try {
-      const res = await authenticatedFetch('/api/admin/create-user', {
-        method: 'POST',
-        body: JSON.stringify({
-          username: newUserUsername,
-          password: newUserPassword,
-          redirectUrl: newUserRedirectUrl
-        })
-      });
-      const data = await res.json();
-      if (res.ok && data?.success && data?.user) {
-        setCreatedUser(data.user);
-        setNewUserUsername('');
-        setNewUserPassword('');
-        setNewUserRedirectUrl('');
-        addLog(`✅ Usuário criado: ${data.user.username}`);
-
-        // Recarrega lista
-        try {
-          const lr = await authenticatedFetch('/api/admin/list-users', { method: 'GET' });
-          const ld = await lr.json();
-          if (lr.ok && ld?.success) setUsersList(ld.users || []);
-        } catch (e) {}
-      } else {
-        alert(data?.error || 'Falha ao criar usuário.');
-      }
-    } catch (e) {
-      alert('Erro de conexão ao criar usuário.');
-    }
-    setCreatingUser(false);
   };
 
   // ==============================================================================
@@ -1039,24 +937,6 @@ export default function AdminPanel() {
                         ))}
                     </div>
                 </div>
-
-                {isAdmin && (
-                    <div style={{background:'#161b22', padding:'25px', borderRadius:'12px', border:'1px solid #30363d'}}>
-                        <h3 style={{marginTop:0, color:'#8957e5'}}>Admin: Usuários</h3>
-                        <div style={{maxHeight:'280px', overflowY:'auto', border:'1px solid #30363d', borderRadius:'8px', background:'#0d1117'}}>
-                            {(usersList || []).map(u => (
-                                <div key={u.id} style={{padding:'12px', borderBottom:'1px solid #30363d'}}>
-                                    <div style={{display:'flex', justifyContent:'space-between', gap:'10px'}}>
-                                        <div style={{fontWeight:'bold', color:'white'}}>{u.username}</div>
-                                        <div style={{fontSize:'11px', color:'#8b949e'}}>{new Date(u.created_at).toLocaleDateString()}</div>
-                                    </div>
-                                    <div style={{fontFamily:'monospace', fontSize:'12px', color:'#58a6ff', wordBreak:'break-all'}}>{`/?t=${u.public_token}`}</div>
-                                    <div style={{fontSize:'12px', color:'#8b949e', wordBreak:'break-all'}}>{u.redirect_url || '—'}</div>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                )}
              </div>
         )}
 
@@ -1070,16 +950,6 @@ export default function AdminPanel() {
                         <h3 style={{margin:0, color:'#d29922'}}>🎯 Criação Inteligente de Grupos</h3>
                         <div style={{fontSize:'12px', color:'#8b949e'}}>
                             {createdGroups.length} grupos criados
-                        </div>
-                    </div>
-                    
-                    <div style={{background:'#0d1117', padding:'20px', borderRadius:'10px', marginBottom:'25px', border:'1px solid #d29922'}}>
-                        <h4 style={{color:'#d29922', margin:'0 0 15px 0'}}>📋 Estratégia Anti-Spam</h4>
-                        <div style={{fontSize:'13px', lineHeight:'1.6', color:'#c9d1d9'}}>
-                            <div>• <strong>Limite:</strong> 200 membros por grupo</div>
-                            <div>• <strong>Pausa:</strong> 15 segundos entre criações</div>
-                            <div>• <strong>Cooldown:</strong> 5 minutos por conta</div>
-                            <div>• <strong>Distribuição:</strong> Automática de leads</div>
                         </div>
                     </div>
                     
@@ -1331,61 +1201,17 @@ export default function AdminPanel() {
         {/* --- ABA FERRAMENTAS (CAMUFLAGEM E STORIES) --- */}
         {tab === 'tools' && (
              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'25px' }}>
-
-                {!isAdmin && (
-                    <div style={{background:'#161b22', padding:'25px', borderRadius:'12px', border:'1px solid #30363d'}}>
-                        <h3 style={{marginTop:0, color:'#1f6feb'}}>Minha Pressel / Redirect</h3>
-                        <p style={{marginTop:0, fontSize:'12px', color:'#8b949e'}}>
-                            Essa URL será usada no redirect após a verificação pública do Telegram quando o link tiver o seu token.
-                        </p>
-                        <input
-                            type="text"
-                            value={myRedirectUrl}
-                            onChange={e=>setMyRedirectUrl(e.target.value)}
-                            placeholder="https://sua-pressel.com"
-                            style={{width:'100%', padding:'14px', marginBottom:'12px', background:'#0d1117', color:'white', border:'1px solid #30363d', borderRadius:'8px', fontSize:'14px'}}
-                        />
-                        <button
-                            onClick={handleSaveRedirectUrl}
-                            disabled={savingRedirect}
-                            style={{width:'100%', padding:'14px', background:'#1f6feb', color:'white', border:'none', borderRadius:'8px', cursor:'pointer', fontWeight:'bold'}}
-                        >
-                            {savingRedirect ? 'SALVANDO...' : 'SALVAR REDIRECT'}
-                        </button>
-                    </div>
-                )}
-
-                {isAdmin && (
-                    <div style={{background:'#161b22', padding:'25px', borderRadius:'12px', border:'1px solid #30363d'}}>
-                        <h3 style={{marginTop:0, color:'#8957e5'}}>Admin: Criar Usuário</h3>
-                        <input type="text" value={newUserUsername} onChange={e=>setNewUserUsername(e.target.value)} placeholder="Username" style={{width:'100%', padding:'14px', marginBottom:'12px', background:'#0d1117', color:'white', border:'1px solid #30363d', borderRadius:'8px', fontSize:'14px'}} />
-                        <input type="password" value={newUserPassword} onChange={e=>setNewUserPassword(e.target.value)} placeholder="Senha" style={{width:'100%', padding:'14px', marginBottom:'12px', background:'#0d1117', color:'white', border:'1px solid #30363d', borderRadius:'8px', fontSize:'14px'}} />
-                        <input type="text" value={newUserRedirectUrl} onChange={e=>setNewUserRedirectUrl(e.target.value)} placeholder="Redirect (opcional)" style={{width:'100%', padding:'14px', marginBottom:'12px', background:'#0d1117', color:'white', border:'1px solid #30363d', borderRadius:'8px', fontSize:'14px'}} />
-                        <button onClick={handleCreateUser} disabled={creatingUser} style={{width:'100%', padding:'14px', background:'#8957e5', color:'white', border:'none', borderRadius:'8px', cursor:'pointer', fontWeight:'bold'}}>
-                            {creatingUser ? 'CRIANDO...' : 'CRIAR USUÁRIO'}
-                        </button>
-
-                        {createdUser && (
-                            <div style={{marginTop:'15px', padding:'12px', background:'#0d1117', border:'1px solid #30363d', borderRadius:'8px'}}>
-                                <div style={{fontSize:'12px', color:'#8b949e'}}>Token público:</div>
-                                <div style={{fontFamily:'monospace', color:'white', wordBreak:'break-all'}}>{createdUser.public_token}</div>
-                                <div style={{fontSize:'12px', color:'#8b949e', marginTop:'10px'}}>Link:</div>
-                                <div style={{fontFamily:'monospace', color:'#58a6ff', wordBreak:'break-all'}}>{`/?t=${createdUser.public_token}`}</div>
-                            </div>
-                        )}
-                    </div>
-                )}
                 
                 {/* CLONAGEM DE IDENTIDADE */}
-                <div style={{background:'#161b22', padding:'25px', borderRadius:'12px', border:'1px solid #30363d'}}>
-                    <h2 style={{marginTop:0, color:'#1f6feb'}}>🎭 Camuflagem (Clonar Identidade)</h2>
-                    <p style={{fontSize:'14px', color:'#8b949e', marginBottom:'20px'}}>Aplique uma nova identidade (nome e foto) em todas as contas selecionadas.</p>
+                <div style={{ backgroundColor: '#161b22', padding: '30px', borderRadius:'12px', border:'1px solid #30363d' }}>
+                    <h3 style={{marginTop:0, color:'#8957e5'}}>🎭 Camuflagem em Massa</h3>
+                    <p style={{fontSize:'13px', opacity:0.7, marginBottom:'25px'}}>Altere o Nome e Foto de todos os infectados selecionados para parecerem suporte oficial ou perfis atraentes.</p>
                     
                     <label style={{display:'block', marginBottom:'8px', fontSize:'13px'}}>Novo Nome Exibido:</label>
                     <input type="text" placeholder="Ex: Suporte VIP Telegram" value={newName} onChange={e => setNewName(e.target.value)} style={{ width: '100%', marginBottom: '20px', padding: '14px', background: '#0d1117', border: '1px solid #30363d', color: 'white', borderRadius:'8px' }} />
                     
                     <label style={{display:'block', marginBottom:'8px', fontSize:'13px'}}>URL da Foto de Perfil:</label>
-                    <input type="text" placeholder="https://..." value={photoUrl} onChange={e => setPhotoUrl(e.target.value)} style={{ width: '100%', marginBottom: '20px', padding: '14px', background: '#0d1117', border: '1px solid #30363d', color: 'white', borderRadius:'8px' }} />
+                    <input type="text" placeholder="https://..." value={photoUrl} onChange={e => setPhotoUrl(e.target.value)} style={{ width: '100%', marginBottom: '25px', padding: '14px', background: '#0d1117', border: '1px solid #30363d', color: 'white', borderRadius:'8px' }} />
                     
                     <button onClick={handleMassUpdateProfile} disabled={processing} style={{ width: '100%', padding: '18px', background: '#8957e5', color: 'white', border: 'none', borderRadius:'10px', fontWeight:'bold', cursor:'pointer', fontSize:'16px' }}>
                         ATUALIZAR IDENTIDADES SELECIONADAS
