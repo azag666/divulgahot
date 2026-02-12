@@ -13,7 +13,7 @@ export default async function handler(req, res) {
         .select('*')
         .eq('status', 'pending')
         .order('username', { ascending: false, nullsFirst: false })
-        .limit(limit || 250);
+        .limit(limit || 5000);
     
     // Se não for admin, filtra por owner_id do usuário logado
     if (!req.isAdmin && req.userId) {
