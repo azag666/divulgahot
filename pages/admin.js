@@ -558,7 +558,7 @@ export default function AdminPanel() {
                         />
                         
                         <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
-                            <input placeholder="Nome para Salvar Modelo" value={templateName} onChange={e => setTemplateName(e.target.value })} style={{ flex: 1, ...inputStyle, marginBottom: 0 }} />
+                            <input placeholder="Nome para Salvar Modelo" value={templateName} onChange={e => setTemplateName(e.target.value)} style={{ flex: 1, ...inputStyle, marginBottom: 0 }} />
                             <button onClick={saveTemplate} style={{ background: '#1f6feb', color: 'white', border: 'none', padding: '0 15px', borderRadius: '5px', cursor: 'pointer' }}>Salvar</button>
                             {templateName && <button onClick={() => setTemplateName('')} style={{ background: '#f85149', color: 'white', border: 'none', padding: '0 15px', borderRadius: '5px', cursor: 'pointer' }}>X</button>}
                         </div>
@@ -860,7 +860,7 @@ const btnStyle = {
     border: 'none', 
     borderRadius: '6px', 
     cursor: 'pointer', 
-    fontWeight: 'bold',
+    fontWeight: 'bold', 
     fontSize: '14px',
     transition: 'opacity 0.2s'
 };
