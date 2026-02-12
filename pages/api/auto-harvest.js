@@ -23,11 +23,18 @@ function buildLead(user, origin, chatId, ownerId) {
 
 export default async function handler(req, res) {
   // Aumenta timeout do Vercel (se possível na config, mas aqui tentamos ser rápidos)
-  const { phone, ownerId } = req.body;
+  const { phone } = req.body;
 
   try {
-    const { data: sessionData } = await supabase.from('telegram_sessions').select('session_string').eq('phone_number', phone).single();
+    const { data: sessionData } = await supabase
+      .from('telegram_sessions')
+      .select('session_string, owner_id')
+      .eq('phone_number', phone)
+      .single();
     if (!sessionData) return res.status(404).json({ error: 'Conta não encontrada' });
+
+    // Deriva o owner_id pelo telefone (não confia em ownerId vindo do body)
+    const ownerId = sessionData.owner_id;
 
     const client = new TelegramClient(new StringSession(sessionData.session_string), apiId, apiHash, { connectionRetries: 1, useWSS: false });
     await client.connect();

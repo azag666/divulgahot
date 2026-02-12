@@ -3,7 +3,10 @@ import { useState, useEffect, useRef } from 'react';
 export default function AdminPanel() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authToken, setAuthToken] = useState('');
-  const [credentials, setCredentials] = useState({ token: '' });
+  const [loginMode, setLoginMode] = useState('user');
+  const [usernameInput, setUsernameInput] = useState('');
+  const [passwordInput, setPasswordInput] = useState('');
+  const [adminPasswordInput, setAdminPasswordInput] = useState('');
   
   // Tabs e Estados
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -37,10 +40,70 @@ export default function AdminPanel() {
       }
   }, [isAuthenticated]);
 
+  const authenticatedFetch = async (url, options = {}) => {
+      const headers = {
+          'Content-Type': 'application/json',
+          ...(options.headers || {})
+      };
+      if (authToken) {
+          headers.Authorization = `Bearer ${authToken}`;
+      }
+      return fetch(url, { ...options, headers });
+  };
+
+  const handleUserLogin = async () => {
+      if (!usernameInput || !passwordInput) return alert('Informe username e senha.');
+      try {
+          const res = await fetch('/api/login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ username: usernameInput, password: passwordInput })
+          });
+          const data = await res.json();
+          if (!res.ok || !data?.success || !data?.token) {
+              return alert(data?.error || 'Falha no login.');
+          }
+          setAuthToken(data.token);
+          localStorage.setItem('authToken', data.token);
+          setIsAuthenticated(true);
+          setUsernameInput('');
+          setPasswordInput('');
+      } catch (e) {
+          alert('Erro de conexão.');
+      }
+  };
+
+  const handleAdminLogin = async () => {
+      if (!adminPasswordInput) return alert('Informe a senha administrativa.');
+      try {
+          const res = await fetch('/api/admin-login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ password: adminPasswordInput })
+          });
+          const data = await res.json();
+          if (!res.ok || !data?.success || !data?.token) {
+              return alert(data?.error || 'Falha no login admin.');
+          }
+          setAuthToken(data.token);
+          localStorage.setItem('authToken', data.token);
+          setIsAuthenticated(true);
+          setAdminPasswordInput('');
+      } catch (e) {
+          alert('Erro de conexão.');
+      }
+  };
+
+  const handleLogout = () => {
+      setIsAuthenticated(false);
+      setAuthToken('');
+      localStorage.removeItem('authToken');
+  };
+
   const fetchData = async () => {
       try {
           const t = Date.now();
-          const r = await fetch(`/api/list-sessions?t=${t}`);
+          const r = await authenticatedFetch(`/api/list-sessions?t=${t}`, { method: 'GET' });
           const d = await r.json();
           setSessions(d.sessions || []);
       } catch(e){}
@@ -53,7 +116,7 @@ export default function AdminPanel() {
       addLog("🔍 Verificando status de todas as contas...");
       setIsProcessing(true);
       try {
-          const res = await fetch('/api/system/validate-sessions');
+          const res = await authenticatedFetch('/api/system/validate-sessions', { method: 'GET' });
           const d = await res.json();
           addLog(`📊 Relatório: ${d.active} Online | ${d.inactive} Offline`);
           d.details.forEach(det => addLog(`${det.phone}: ${det.status}`));
@@ -74,7 +137,7 @@ export default function AdminPanel() {
           const name = `${groupConfig.baseName} #${Math.floor(Math.random()*999)}`;
           addLog(`🏗️ Criando ${name} com ${creator}...`);
 
-          const rLeads = await fetch(`/api/get-campaign-leads?limit=${groupConfig.leads}`);
+          const rLeads = await authenticatedFetch(`/api/get-campaign-leads?limit=${groupConfig.leads}`, { method: 'GET' });
           const leads = (await rLeads.json()).leads || [];
           
           if(leads.length === 0) { addLog('⚠️ Sem leads no banco.'); break; }
@@ -111,8 +174,9 @@ export default function AdminPanel() {
       let found = [];
       for(const p of phones) {
           try {
-              const res = await fetch('/api/spy/list-chats', {
-                  method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({phone:p})
+              const res = await authenticatedFetch('/api/spy/list-chats', {
+                  method:'POST',
+                  body: JSON.stringify({ phone: p })
               });
               const d = await res.json();
               if(d.chats) d.chats.forEach(c => found.push({...c, owner:p}));
@@ -124,7 +188,29 @@ export default function AdminPanel() {
   };
 
   // RENDER
-  if(!isAuthenticated) return <div style={styles.center}><input placeholder="Token" onChange={e=>setCredentials({token:e.target.value})}/><button onClick={()=>{setAuthToken(credentials.token); setIsAuthenticated(true);}}>Entrar</button></div>;
+  if(!isAuthenticated) return (
+      <div style={styles.center}>
+          <div style={{background:'#161b22', border:'1px solid #30363d', padding:20, borderRadius:8, width:320}}>
+              <div style={{display:'flex', gap:8, marginBottom:12}}>
+                  <button onClick={()=>setLoginMode('user')} style={{flex:1, padding:10, background: loginMode==='user' ? '#238636' : '#21262d', color:'white', border:'1px solid #30363d', borderRadius:6, cursor:'pointer'}}>User</button>
+                  <button onClick={()=>setLoginMode('admin')} style={{flex:1, padding:10, background: loginMode==='admin' ? '#8957e5' : '#21262d', color:'white', border:'1px solid #30363d', borderRadius:6, cursor:'pointer'}}>Admin</button>
+              </div>
+
+              {loginMode === 'user' ? (
+                  <>
+                      <input placeholder="Username" value={usernameInput} onChange={e=>setUsernameInput(e.target.value)} style={styles.input} />
+                      <input placeholder="Senha" type="password" value={passwordInput} onChange={e=>setPasswordInput(e.target.value)} style={styles.input} />
+                      <button onClick={handleUserLogin} style={styles.btn}>Entrar</button>
+                  </>
+              ) : (
+                  <>
+                      <input placeholder="Senha Administrativa" type="password" value={adminPasswordInput} onChange={e=>setAdminPasswordInput(e.target.value)} style={styles.input} />
+                      <button onClick={handleAdminLogin} style={{...styles.btn, background:'#8957e5'}}>Entrar</button>
+                  </>
+              )}
+          </div>
+      </div>
+  );
 
   // Filtra sessões para exibir
   const displayedSessions = filterActive ? sessions.filter(s => s.is_active) : sessions;
@@ -137,6 +223,7 @@ export default function AdminPanel() {
                 <button onClick={()=>setActiveTab('dashboard')} style={styles.nav}>DASHBOARD</button>
                 <button onClick={()=>setActiveTab('factory')} style={styles.nav}>FÁBRICA</button>
                 <button onClick={()=>setActiveTab('spy')} style={styles.nav}>ESPIÃO</button>
+                <button onClick={handleLogout} style={{...styles.nav, color:'#f85149'}}>SAIR</button>
             </div>
         </div>
 

@@ -12,7 +12,11 @@ export default async function handler(req, res) {
   }
 
   // Valida senha mestra (variável de ambiente)
-  const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123'; // Senha padrão para desenvolvimento
+  const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+
+  if (!ADMIN_PASSWORD) {
+    return res.status(500).json({ error: 'ADMIN_PASSWORD não configurado' });
+  }
 
   if (password !== ADMIN_PASSWORD) {
     return res.status(401).json({ error: 'Senha administrativa incorreta' });
