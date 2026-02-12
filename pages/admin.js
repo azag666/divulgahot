@@ -107,6 +107,8 @@ export default function AdminPanel() {
     // Se já estiver autenticado, busca os dados atualizados do servidor
     if (isAuthenticated && authToken) {
         fetchData();
+        // Carrega grupos e canais escaneados do servidor
+        loadScannedChatsFromServer();
     }
   }, [isAuthenticated, authToken]);
 
@@ -146,6 +148,60 @@ export default function AdminPanel() {
       ...options.headers
     };
     return fetch(url, { ...options, headers });
+  };
+
+  // Carrega grupos e canais escaneados do servidor
+  const loadScannedChatsFromServer = async () => {
+    try {
+      const res = await authenticatedFetch('/api/spy/get-scanned-chats');
+      if (!res.ok) {
+        // Se a tabela não existir ainda, retorna silenciosamente
+        if (res.status === 500) {
+          console.warn('Tabela scanned_chats pode não existir ainda. Criando...');
+          return;
+        }
+        return;
+      }
+
+      const data = await res.json();
+      if (data.success && (data.groups.length > 0 || data.channels.length > 0)) {
+        // Mescla com dados do localStorage (servidor tem prioridade)
+        const localGroups = JSON.parse(localStorage.getItem('godModeGroups') || '[]');
+        const localChannels = JSON.parse(localStorage.getItem('godModeChannels') || '[]');
+        
+        // Cria mapas para evitar duplicatas (servidor tem prioridade)
+        const serverGroupsMap = new Map(data.groups.map(g => [g.id, g]));
+        const serverChannelsMap = new Map(data.channels.map(c => [c.id, c]));
+        
+        // Adiciona grupos do localStorage que não estão no servidor
+        for (const localGroup of localGroups) {
+          if (!serverGroupsMap.has(localGroup.id)) {
+            serverGroupsMap.set(localGroup.id, localGroup);
+          }
+        }
+        
+        // Adiciona canais do localStorage que não estão no servidor
+        for (const localChannel of localChannels) {
+          if (!serverChannelsMap.has(localChannel.id)) {
+            serverChannelsMap.set(localChannel.id, localChannel);
+          }
+        }
+        
+        // Converte mapas de volta para arrays e ordena
+        const mergedGroups = Array.from(serverGroupsMap.values()).sort((a, b) => (b.participantsCount || 0) - (a.participantsCount || 0));
+        const mergedChannels = Array.from(serverChannelsMap.values()).sort((a, b) => (b.participantsCount || 0) - (a.participantsCount || 0));
+        
+        setAllGroups(mergedGroups);
+        setAllChannels(mergedChannels);
+        
+        // Atualiza localStorage com dados mesclados
+        localStorage.setItem('godModeGroups', JSON.stringify(mergedGroups));
+        localStorage.setItem('godModeChannels', JSON.stringify(mergedChannels));
+      }
+    } catch (error) {
+      console.error('Erro ao carregar chats escaneados do servidor:', error);
+      // Em caso de erro, mantém dados do localStorage
+    }
   };
 
   const fetchData = async () => {
@@ -546,9 +602,31 @@ export default function AdminPanel() {
       setAllGroups(uniqueGroups);
       setAllChannels(uniqueChannels);
       
-      // Salva no navegador
+      // Salva no navegador (cache rápido)
       localStorage.setItem('godModeGroups', JSON.stringify(uniqueGroups));
       localStorage.setItem('godModeChannels', JSON.stringify(uniqueChannels));
+      
+      // Salva no servidor (persistência)
+      try {
+        const saveRes = await authenticatedFetch('/api/spy/save-scanned-chats', {
+          method: 'POST',
+          body: JSON.stringify({
+            groups: uniqueGroups,
+            channels: uniqueChannels
+          })
+        });
+        
+        if (saveRes.ok) {
+          const saveData = await saveRes.json();
+          addLog(`✅ ${saveData.saved || 0} chats salvos no servidor`);
+        } else {
+          console.warn('Erro ao salvar chats no servidor:', await saveRes.text());
+          // Não bloqueia o processo se falhar ao salvar no servidor
+        }
+      } catch (saveError) {
+        console.error('Erro ao salvar chats no servidor:', saveError);
+        // Não bloqueia o processo se falhar ao salvar no servidor
+      }
       
       setIsScanning(false);
   };
