@@ -956,7 +956,7 @@ export default function AdminPanel() {
                     <div style={{background:'#0d1117', padding:'20px', borderRadius:'10px', marginBottom:'25px', border:'1px solid #3390ec'}}>
                         <h4 style={{color:'#3390ec', margin:'0 0 15px 0'}}>🎨 Personalização dos Grupos</h4>
                         
-                        <label style={{display:'block', marginBottom:'8px', fontSize:'13px', fontWeight:'bold', color:'#c9d1d9'}}>Nome do Grupo (use {number} para numeração):</label>
+                        <label style={{display:'block', marginBottom:'8px', fontSize:'13px', fontWeight:'bold', color:'#c9d1d9'}}>Nome do Grupo (use {'{number}'} para numeração):</label>
                         <input 
                             type="text" 
                             placeholder="VIP Club {number}" 
@@ -965,7 +965,7 @@ export default function AdminPanel() {
                             style={{width:'100%', padding:'12px', marginBottom:'15px', background:'#000', color:'white', border:'1px solid #30363d', borderRadius:'6px', fontSize:'14px'}} 
                         />
                         <div style={{fontSize:'11px', color:'#8b949e', marginBottom:'15px'}}>
-                            Ex: "VIP Club {number}" → "VIP Club 001", "VIP Club 002"...
+                            Ex: "VIP Club {'{number}'}" → "VIP Club 001", "VIP Club 002"...
                         </div>
                         
                         <label style={{display:'block', marginBottom:'8px', fontSize:'13px', fontWeight:'bold', color:'#c9d1d9'}}>Foto do Grupo (URL):</label>
