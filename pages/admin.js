@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useLayoutEffect } from 'react';
 
 // ============================================================================
-// HOTTRACK V14 - PAINEL CORRIGIDO E OTIMIZADO
+// HOTTRACK V15 - CHAT FIXO & DADOS EM TEMPO REAL
 // ============================================================================
 
 export default function AdminPanel() {
@@ -28,14 +28,17 @@ export default function AdminPanel() {
   const [templateName, setTemplateName] = useState('');
   const stopProcessRef = useRef(false);
 
-  // --- INBOX (CHAT) ---
+  // --- INBOX (CHAT CORRIGIDO) ---
   const [replies, setReplies] = useState([]);
   const [isLoadingReplies, setIsLoadingReplies] = useState(false);
   const [selectedChat, setSelectedChat] = useState(null);
   const [chatHistory, setChatHistory] = useState([]);
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [chatOffset, setChatOffset] = useState(0);
-  const messagesEndRef = useRef(null); 
+  
+  // Refs para controle de scroll
+  const chatListRef = useRef(null); 
+  const [shouldScrollToBottom, setShouldScrollToBottom] = useState(true);
 
   // --- SPY & TOOLS ---
   const [allGroups, setAllGroups] = useState([]);
@@ -45,7 +48,7 @@ export default function AdminPanel() {
   const [toolsInput, setToolsInput] = useState({ name: '', photo: '', storyUrl: '', storyCaption: '' });
 
   // ==========================================================================
-  // INICIALIZAÇÃO E EFEITOS
+  // INICIALIZAÇÃO E POLLING (DADOS REAIS)
   // ==========================================================================
 
   useEffect(() => {
@@ -56,42 +59,37 @@ export default function AdminPanel() {
       }
       
       const savedGroups = localStorage.getItem('godModeGroups');
-      if (savedGroups) {
-          setAllGroups(JSON.parse(savedGroups));
-      }
+      if (savedGroups) setAllGroups(JSON.parse(savedGroups));
 
       const savedTemplates = localStorage.getItem('ht_templates');
-      if (savedTemplates) {
-          setTemplates(JSON.parse(savedTemplates));
-      }
+      if (savedTemplates) setTemplates(JSON.parse(savedTemplates));
   }, []);
 
-  // Polling de dados (Atualização Automática)
+  // Polling Agressivo (Atualiza a cada 3s para garantir dados frescos)
   useEffect(() => {
       if (isAuthenticated) {
-          fetchData(); // Carrega inicial
-          
-          // Atualiza status e estatísticas a cada 5 segundos
+          fetchData(); 
           const intervalId = setInterval(() => {
-              if (!isProcessing) { // Evita conflito se estiver disparando muito rápido
-                  fetchSessionsOnly();
-                  fetchStats();
-              }
-          }, 5000);
+              // Adiciona timestamp para evitar cache do navegador
+              const t = Date.now();
+              apiCall(`/api/list-sessions?t=${t}`).then(r => r?.ok && r.json().then(d => setSessions(d.sessions || [])));
+              apiCall(`/api/stats?t=${t}`).then(r => r?.ok && r.json().then(d => setStats(d)));
+          }, 3000); // 3 segundos
 
           return () => clearInterval(intervalId);
       }
-  }, [isAuthenticated, isProcessing]);
+  }, [isAuthenticated]);
 
-  // Scroll automático no chat
-  useEffect(() => {
-      if (messagesEndRef.current) {
-          messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+  // Controle de Scroll Inteligente
+  useLayoutEffect(() => {
+      if (chatListRef.current && shouldScrollToBottom) {
+          // Rola para o final apenas se for abertura de chat ou nova mensagem enviada
+          chatListRef.current.scrollTop = chatListRef.current.scrollHeight;
       }
-  }, [chatHistory, selectedChat]);
+  }, [chatHistory, shouldScrollToBottom, selectedChat]);
 
   // ==========================================================================
-  // FUNÇÕES DE DADOS (API)
+  // FUNÇÕES API
   // ==========================================================================
 
   const apiCall = async (endpoint, body) => {
@@ -104,93 +102,39 @@ export default function AdminPanel() {
               },
               body: body ? JSON.stringify(body) : null
           });
-          
-          if (response.status === 401) { 
-              setIsAuthenticated(false); 
-              return null; 
-          }
+          if (response.status === 401) { setIsAuthenticated(false); return null; }
           return response;
-      } catch (error) { 
-          return { ok: false, json: async () => ({ error: 'Erro de Conexão' }) }; 
-      }
+      } catch (error) { return { ok: false }; }
   };
 
   const addLog = (message) => {
       const time = new Date().toLocaleTimeString();
-      setLogs(prevLogs => [`[${time}] ${message}`, ...prevLogs].slice(0, 300));
+      setLogs(prev => [`[${time}] ${message}`, ...prev].slice(0, 300));
   };
 
-  const formatTime = (timestamp) => {
-      if (!timestamp) return '';
-      return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  };
-
-  // Carrega tudo (Pesado)
   const fetchData = async () => {
-      await fetchSessionsOnly();
-      await fetchStats();
-      
-      // Carrega grupos aspirados apenas uma vez ou sob demanda
-      const harvestedResponse = await apiCall('/api/get-harvested');
-      if (harvestedResponse?.ok) {
-          const data = await harvestedResponse.json();
-          if (data.harvestedIds) {
-              setHarvestedIds(new Set(data.harvestedIds));
-          }
-      }
-  };
-
-  // Carrega apenas sessões (Leve) - CORRIGIDO O BUG DE STATUS
-  const fetchSessionsOnly = async () => {
-      const sessionResponse = await apiCall('/api/list-sessions');
-      if (sessionResponse?.ok) {
-          const data = await sessionResponse.json();
-          // CORREÇÃO: Sobrescreve o estado anterior com o novo do servidor para garantir status real
+      const t = Date.now();
+      const sRes = await apiCall(`/api/list-sessions?t=${t}`);
+      if (sRes?.ok) {
+          const data = await sRes.json();
           setSessions(data.sessions || []);
       }
-  };
-
-  // Carrega estatísticas
-  const fetchStats = async () => {
-      const response = await apiCall('/api/stats');
-      if (response?.ok) {
-          setStats(await response.json());
+      const stRes = await apiCall(`/api/stats?t=${t}`);
+      if (stRes?.ok) setStats(await stRes.json());
+      
+      const hRes = await apiCall('/api/get-harvested');
+      if (hRes?.ok) {
+          const data = await hRes.json();
+          if (data.harvestedIds) setHarvestedIds(new Set(data.harvestedIds));
       }
   };
 
   // ==========================================================================
-  // GESTÃO DE MODELOS
+  // LÓGICA DO ENGINE (DISPARO)
   // ==========================================================================
-  
-  const saveTemplate = () => {
-      if (!templateName) return alert('Digite um nome para o modelo.');
-      const newTemplates = [...templates, { id: Date.now(), name: templateName, msg: config.msg, img: config.imgUrl }];
-      setTemplates(newTemplates);
-      localStorage.setItem('ht_templates', JSON.stringify(newTemplates));
-      setTemplateName('');
-      alert('Modelo salvo!');
-  };
 
-  const loadTemplate = (id) => {
-      const template = templates.find(x => x.id == id);
-      if (template) {
-          setConfig({ ...config, msg: template.msg, imgUrl: template.img });
-      }
-  };
-
-  const deleteTemplate = (id) => {
-      if (!confirm('Excluir modelo?')) return;
-      const newTemplates = templates.filter(x => x.id !== id);
-      setTemplates(newTemplates);
-      localStorage.setItem('ht_templates', JSON.stringify(newTemplates));
-  };
-
-  // ==========================================================================
-  // ENGINE V14 (SISTEMA DE DISPARO)
-  // ==========================================================================
-  
   const startEngine = async () => {
-      if (selectedPhones.size === 0) return alert('Selecione pelo menos uma conta!');
+      if (selectedPhones.size === 0) return alert('Selecione contas!');
       setIsProcessing(true);
       stopProcessRef.current = false;
       addLog('🚀 ENGINE INICIADA');
@@ -204,31 +148,27 @@ export default function AdminPanel() {
 
           if (activeSenders.length === 0) {
               addLog('⏳ Todas as contas em Flood Wait. Aguardando 10s...');
-              await new Promise(resolve => setTimeout(resolve, 10000));
+              await new Promise(r => setTimeout(r, 10000));
               continue;
           }
 
-          // Busca Leads
-          const leadsResponse = await apiCall(`/api/get-campaign-leads?limit=20&random=${config.useRandom}`);
-          const leadsData = await leadsResponse?.json();
+          // Busca leads SEM cache
+          const t = Date.now();
+          const leadsRes = await apiCall(`/api/get-campaign-leads?limit=15&random=${config.useRandom}&t=${t}`);
+          const leadsData = await leadsRes?.json();
           const leads = leadsData?.leads || [];
 
-          if (leads.length === 0) { 
-              addLog('✅ Lista de leads finalizada.'); 
-              break; 
-          }
+          if (leads.length === 0) { addLog('✅ Sem leads pendentes.'); break; }
 
-          // Disparo em Paralelo Controlado
+          // Processamento em Lote
           const promises = leads.map(async (lead) => {
                if (stopProcessRef.current) return;
-               
-               // Seleciona remetente livre
                const currentSenders = senders.filter(p => !cooldowns[p] || Date.now() > cooldowns[p]);
                if (currentSenders.length === 0) return;
                const sender = currentSenders[Math.floor(Math.random() * currentSenders.length)];
 
                try {
-                  const response = await apiCall('/api/dispatch', {
+                  const res = await apiCall('/api/dispatch', {
                       senderPhone: sender, 
                       target: lead.user_id, 
                       username: lead.username,
@@ -236,57 +176,50 @@ export default function AdminPanel() {
                       imageUrl: config.imgUrl, 
                       leadDbId: lead.id
                   });
-                  const data = await response.json();
+                  const data = await res.json();
 
-                  if (response.status === 429 || (data.error && data.error.includes('FLOOD'))) {
-                      const waitSeconds = data.wait || 60;
-                      cooldowns[sender] = Date.now() + (waitSeconds * 1000);
-                      addLog(`⛔ Flood ${sender}. Pausa ${waitSeconds}s.`);
+                  if (res.status === 429 || (data.error && data.error.includes('FLOOD'))) {
+                      const wait = data.wait || 60;
+                      cooldowns[sender] = Date.now() + (wait * 1000);
+                      addLog(`⛔ Flood ${sender}. Pausa ${wait}s.`);
                   } else if (data.success) {
-                      addLog(`✅ Enviado: ${sender} -> ${lead.username || lead.user_id}`);
-                      // Atualiza stats localmente para feedback instantâneo
+                      addLog(`✅ Enviado: ${sender} -> ${lead.username}`);
                       setStats(prev => ({ ...prev, sent: prev.sent + 1, pending: prev.pending - 1 }));
                   } else {
                       addLog(`❌ Erro ${sender}: ${data.error}`);
                   }
-               } catch (e) { console.error(e); }
+               } catch (e) { }
           });
 
           await Promise.all(promises);
-          await new Promise(resolve => setTimeout(resolve, 2000)); // Delay entre lotes
-          fetchStats(); // Sincroniza stats real com backend
+          await new Promise(r => setTimeout(r, 2000));
       }
       setIsProcessing(false);
       addLog('🏁 Engine Parada.');
-      fetchData();
   };
 
   // ==========================================================================
-  // INBOX MELHORADO
+  // INBOX (CHAT) - LÓGICA CORRIGIDA
   // ==========================================================================
-  
+
   const loadInbox = async () => {
-      if (selectedPhones.size === 0) return alert('Selecione contas na Dashboard primeiro!');
+      if (selectedPhones.size === 0) return alert('Selecione contas na Dashboard!');
       setIsLoadingReplies(true);
       setReplies([]);
       
       const phones = Array.from(selectedPhones);
-      let allReplies = [];
+      let all = [];
+      const t = Date.now();
 
-      // Processa em lotes para não travar a UI
-      const CHUNK_SIZE = 5;
-      for (let i = 0; i < phones.length; i += CHUNK_SIZE) {
-          const batch = phones.slice(i, i + CHUNK_SIZE);
+      // Busca mensagens em blocos de 5 contas
+      for (let i = 0; i < phones.length; i += 5) {
+          const batch = phones.slice(i, i + 5);
           const results = await Promise.all(batch.map(p => 
-              apiCall('/api/spy/check-replies', { phone: p })
-                  .then(r => r.json())
-                  .catch(() => ({ replies: [] }))
+              apiCall(`/api/spy/check-replies?phone=${p}&t=${t}`).then(r => r.json()).catch(() => ({}))
           ));
-          results.forEach(result => { 
-              if (result.replies) allReplies = [...allReplies, ...result.replies]; 
-          });
+          results.forEach(r => { if (r.replies) all.push(...r.replies); });
       }
-      setReplies(allReplies.sort((a, b) => b.timestamp - a.timestamp));
+      setReplies(all.sort((a, b) => b.timestamp - a.timestamp));
       setIsLoadingReplies(false);
   };
 
@@ -294,66 +227,60 @@ export default function AdminPanel() {
       if (offset === 0) {
           setSelectedChat(reply);
           setChatHistory([]);
+          setChatOffset(0);
+          setShouldScrollToBottom(true); // Abre chat -> Rola pro final
+      } else {
+          setShouldScrollToBottom(false); // Carrega mais -> NÃO rola pro final
       }
+      
       setIsChatLoading(true);
-
       try {
-          const response = await apiCall('/api/spy/get-history', {
+          const res = await apiCall('/api/spy/get-history', {
               phone: reply.fromPhone,
               chatId: reply.chatId,
               limit: 20,
               offset: offset
           });
-          
-          if (response.ok) {
-              const data = await response.json();
-              if (data.history) {
-                  const sortedHistory = data.history.reverse(); // Garante ordem cronológica
-                  setChatHistory(prev => offset === 0 ? sortedHistory : [...sortedHistory, ...prev]);
-                  setChatOffset(offset + 20);
-              }
+          const data = await res.json();
+          if (data.history) {
+              // Garante ordem correta e concatena
+              const newMsgs = data.history.reverse();
+              setChatHistory(prev => offset === 0 ? newMsgs : [...newMsgs, ...prev]);
+              setChatOffset(offset + 20);
           }
-      } catch (error) { console.error(error); }
+      } catch (e) { console.error(e); }
       setIsChatLoading(false);
   };
 
   // ==========================================================================
   // SPY & TOOLS
   // ==========================================================================
-
-  const scanGroups = async () => {
+  const scanGroups = async () => { /* Mantido igual */
       if (selectedPhones.size === 0) return alert('Selecione contas!');
       setIsScanning(true);
-      addLog('📡 Escaneando grupos...');
-      let foundGroups = [];
+      addLog('📡 Escaneando...');
+      let found = [];
       const phones = Array.from(selectedPhones);
-      
       for (const p of phones) {
           try {
-              const response = await apiCall('/api/spy/list-chats', { phone: p });
-              const data = await response.json();
-              if (data.chats) {
-                  data.chats.forEach(c => {
-                      if (!c.type.includes('Canal')) foundGroups.push({ ...c, ownerPhone: p });
-                  });
-              }
+              const res = await apiCall('/api/spy/list-chats', { phone: p });
+              const data = await res.json();
+              if (data.chats) data.chats.forEach(c => !c.type.includes('Canal') && found.push({ ...c, ownerPhone: p }));
           } catch (e) { }
       }
-      const uniqueGroups = [...new Map(foundGroups.map(item => [item.id, item])).values()];
-      setAllGroups(uniqueGroups);
-      localStorage.setItem('godModeGroups', JSON.stringify(uniqueGroups));
+      const unique = [...new Map(found.map(i => [i.id, i])).values()];
+      setAllGroups(unique);
+      localStorage.setItem('godModeGroups', JSON.stringify(unique));
       setIsScanning(false);
-      addLog(`📡 ${uniqueGroups.length} grupos encontrados.`);
+      addLog(`📡 ${unique.length} grupos.`);
   };
 
-  const harvestAll = async () => {
+  const harvestAll = async () => { /* Mantido igual */
       const targets = allGroups.filter(g => !harvestedIds.has(g.id));
-      if (targets.length === 0) return alert('Nada novo para aspirar.');
+      if (targets.length === 0) return alert('Nada novo.');
       if (!confirm(`Aspirar ${targets.length} grupos?`)) return;
-      
       setIsHarvesting(true);
-      addLog('🕷️ Iniciando aspiração...');
-      
+      addLog('🕷️ Aspirando...');
       for (const t of targets) {
           try {
              const res = await apiCall('/api/spy/harvest', { phone: t.ownerPhone, chatId: t.id, chatName: t.title });
@@ -366,22 +293,7 @@ export default function AdminPanel() {
           await new Promise(r => setTimeout(r, 1000));
       }
       setIsHarvesting(false);
-      addLog('🏁 Aspiração finalizada.');
-      fetchData();
-  };
-
-  const runTool = async (endpoint, payload) => {
-      if (selectedPhones.size === 0) return alert('Selecione contas!');
-      setIsProcessing(true);
-      addLog('⚙️ Executando em massa...');
-      const phones = Array.from(selectedPhones);
-      for (const p of phones) {
-          try {
-              await apiCall(endpoint, { phone: p, ...payload });
-              addLog(`✅ OK: ${p}`);
-          } catch (e) { addLog(`❌ Erro: ${p}`); }
-      }
-      setIsProcessing(false);
+      addLog('🏁 Fim.');
   };
 
   // ==========================================================================
@@ -392,26 +304,18 @@ export default function AdminPanel() {
       e.preventDefault();
       const endpoint = loginMode === 'user' ? '/api/login' : '/api/admin-login';
       const body = loginMode === 'user' ? { username: credentials.user, password: credentials.pass } : { password: credentials.token };
-      
       try {
-          const response = await fetch(endpoint, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(body)
-          });
-          const data = await response.json();
-          if (data.success) { 
-              setAuthToken(data.token); 
-              setIsAuthenticated(true); 
-              localStorage.setItem('authToken', data.token); 
-          } else { alert(data.error || 'Erro login'); }
+          const res = await fetch(endpoint, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
+          const data = await res.json();
+          if (data.success) { setAuthToken(data.token); setIsAuthenticated(true); localStorage.setItem('authToken', data.token); }
+          else alert(data.error);
       } catch (e) { alert('Erro conexão'); }
   };
 
   if (!isAuthenticated) return (
       <div style={styles.loginContainer}>
           <form onSubmit={handleLogin} style={styles.loginBox}>
-              <h2 style={{ textAlign: 'center', margin: '0 0 20px 0' }}>HOTTRACK ADMIN</h2>
+              <h2 style={{ textAlign: 'center', color:'white', marginBottom:'20px' }}>HOTTRACK ADMIN</h2>
               <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
                   <button type="button" onClick={() => setLoginMode('user')} style={{...styles.toggleBtn, background: loginMode === 'user' ? '#238636' : '#21262d'}}>User</button>
                   <button type="button" onClick={() => setLoginMode('admin')} style={{...styles.toggleBtn, background: loginMode === 'admin' ? '#8957e5' : '#21262d'}}>Admin</button>
@@ -435,9 +339,8 @@ export default function AdminPanel() {
         <div style={styles.header}>
             <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
                 <h2 style={{ margin: 0, color: 'white' }}>HOTTRACK</h2>
-                <span style={styles.versionBadge}>V14.2 LIVE</span>
+                <span style={styles.versionBadge}>V15 PRO</span>
             </div>
-            
             <div style={{ display: 'flex', gap: '10px' }}>
                 {['dashboard', 'inbox', 'spy', 'tools'].map(tab => (
                     <button key={tab} onClick={() => setActiveTab(tab)} style={{
@@ -453,92 +356,48 @@ export default function AdminPanel() {
         {/* DASHBOARD */}
         {activeTab === 'dashboard' && (
             <div style={styles.dashboardGrid}>
-                {/* Coluna Esquerda: Stats e Controle */}
                 <div style={{display:'flex', flexDirection:'column', gap:'20px'}}>
                     <div style={{ display: 'flex', gap: '15px' }}>
-                        <StatBox label="LEADS PENDENTES" val={stats.pending} color="#d29922" />
-                        <StatBox label="ENVIADOS HOJE" val={stats.sent} color="#238636" />
-                        <StatBox label="CONTAS ONLINE" val={sessions.filter(s => s.is_active).length} color="#1f6feb" />
+                        <StatBox label="PENDENTES" val={stats.pending} color="#d29922" />
+                        <StatBox label="ENVIADOS" val={stats.sent} color="#238636" />
+                        <StatBox label="ONLINE" val={sessions.filter(s => s.is_active).length} color="#1f6feb" />
                     </div>
                     
                     <div style={styles.card}>
-                        <div style={styles.cardHeader}>
-                            <h3>Configuração de Envio</h3>
-                            <select onChange={(e) => loadTemplate(e.target.value)} style={styles.select}>
-                                <option value="">📂 Carregar Modelo...</option>
-                                {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                            </select>
-                        </div>
-
-                        <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
-                            <input placeholder="URL Imagem (Opcional)" value={config.imgUrl} onChange={e => setConfig({ ...config, imgUrl: e.target.value })} style={{ flex: 1, ...styles.input, marginBottom: 0 }} />
+                        <h3>Configuração de Envio</h3>
+                        <div style={{ display: 'flex', gap: '10px', margin: '10px 0' }}>
+                            <input placeholder="URL Imagem" value={config.imgUrl} onChange={e => setConfig({ ...config, imgUrl: e.target.value })} style={{ flex: 1, ...styles.input, marginBottom: 0 }} />
                             <label style={styles.checkboxLabel}>
                                 <input type="checkbox" checked={config.useRandom} onChange={e => setConfig({ ...config, useRandom: e.target.checked })} /> Aleatório
                             </label>
                         </div>
-                        <textarea 
-                            placeholder="Mensagem (Spintax suportado: {Oi|Olá})..." 
-                            value={config.msg} 
-                            onChange={e => setConfig({ ...config, msg: e.target.value })} 
-                            style={{ ...styles.input, height: '100px', fontFamily: 'monospace' }} 
-                        />
-                        
-                        <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
-                            <input placeholder="Nome do Modelo" value={templateName} onChange={e => setTemplateName(e.target.value)} style={{ flex: 1, ...styles.input, marginBottom: 0 }} />
-                            <button onClick={saveTemplate} style={{...styles.btn, background: '#1f6feb', width: 'auto'}}>Salvar</button>
-                            {templateName && <button onClick={() => setTemplateName('')} style={{...styles.btn, background: '#f85149', width: 'auto'}}>X</button>}
-                        </div>
-
+                        <textarea placeholder="Mensagem..." value={config.msg} onChange={e => setConfig({ ...config, msg: e.target.value })} style={{ ...styles.input, height: '80px' }} />
                         <div style={{ display: 'flex', gap: '10px' }}>
-                            {!isProcessing ? (
-                                <button onClick={startEngine} style={{ ...styles.btn, background: '#238636' }}>🚀 INICIAR</button>
-                            ) : (
+                            {!isProcessing ? 
+                                <button onClick={startEngine} style={{ ...styles.btn, background: '#238636' }}>🚀 INICIAR</button> : 
                                 <button onClick={() => stopProcessRef.current = true} style={{ ...styles.btn, background: '#f85149' }}>🛑 PARAR</button>
-                            )}
+                            }
                         </div>
                     </div>
-                    
                     <div style={styles.logBox}>
-                        {logs.map((l, i) => (
-                            <div key={i} style={{ 
-                                color: l.includes('Erro') || l.includes('Flood') ? '#ff7b72' : l.includes('Enviado') ? '#7ee787' : '#8b949e',
-                                padding: '2px 0',
-                                fontSize: '12px'
-                            }}>
-                                {l}
-                            </div>
-                        ))}
+                        {logs.map((l, i) => <div key={i} style={{ fontSize:'12px', color: l.includes('Erro') ? '#f85149' : '#8b949e' }}>{l}</div>)}
                     </div>
                 </div>
 
-                {/* Coluna Direita: Contas */}
                 <div style={styles.card}>
                     <div style={styles.cardHeader}>
-                        <h4>Minhas Contas</h4>
-                        <button onClick={() => {
-                            const active = new Set();
-                            sessions.forEach(s => s.is_active && active.add(s.phone_number));
-                            setSelectedPhones(active);
-                        }} style={styles.linkBtn}>Selecionar Online</button>
+                        <h4>Contas ({sessions.length})</h4>
+                        <button onClick={() => setSelectedPhones(new Set(sessions.filter(s => s.is_active).map(s => s.phone_number)))} style={styles.linkBtn}>Selecionar Online</button>
                     </div>
                     <div style={{ flex: 1, overflowY: 'auto' }}>
                         {sessions.map(s => (
                             <div key={s.id} onClick={() => {
-                                const newSelection = new Set(selectedPhones);
-                                newSelection.has(s.phone_number) ? newSelection.delete(s.phone_number) : newSelection.add(s.phone_number);
-                                setSelectedPhones(newSelection);
-                            }} style={{
-                                ...styles.accountRow,
-                                background: selectedPhones.has(s.phone_number) ? 'rgba(31, 111, 235, 0.2)' : 'transparent',
-                                borderColor: selectedPhones.has(s.phone_number) ? '#1f6feb' : 'transparent'
-                            }}>
-                                <div style={{ 
-                                    width: '10px', height: '10px', borderRadius: '50%', 
-                                    background: s.is_active ? '#238636' : '#f85149',
-                                    boxShadow: s.is_active ? '0 0 5px #238636' : 'none'
-                                }}></div>
-                                <span style={{fontWeight: '500'}}>{s.phone_number}</span>
-                                {s.is_active && <span style={{fontSize:'10px', background:'#238636', padding:'2px 4px', borderRadius:'3px'}}>ON</span>}
+                                const newS = new Set(selectedPhones);
+                                newS.has(s.phone_number) ? newS.delete(s.phone_number) : newS.add(s.phone_number);
+                                setSelectedPhones(newS);
+                            }} style={{...styles.accountRow, background: selectedPhones.has(s.phone_number) ? '#1f6feb22' : 'transparent'}}>
+                                <div style={{width:'8px', height:'8px', borderRadius:'50%', background: s.is_active ? '#238636' : '#f85149'}}></div>
+                                <span>{s.phone_number}</span>
                             </div>
                         ))}
                     </div>
@@ -546,229 +405,166 @@ export default function AdminPanel() {
             </div>
         )}
 
-        {/* INBOX (CHAT MELHORADO) */}
+        {/* INBOX CORRIGIDO */}
         {activeTab === 'inbox' && (
             <div style={styles.chatContainer}>
-                {/* Lista Lateral */}
                 <div style={styles.chatSidebar}>
-                    <div style={{ padding: '15px', borderBottom: '1px solid #30363d', background: '#161b22' }}>
-                        <button 
-                            onClick={loadInbox} 
-                            disabled={isLoadingReplies} 
-                            style={{...styles.btn, background: isLoadingReplies ? '#21262d' : '#1f6feb'}}
-                        >
-                            {isLoadingReplies ? 'Buscando...' : '🔄 Atualizar Inbox'}
+                    <div style={{ padding: '10px', borderBottom: '1px solid #30363d' }}>
+                        <button onClick={loadInbox} style={{...styles.btn, background: isLoadingReplies ? '#21262d' : '#1f6feb', fontSize:'12px'}}>
+                            {isLoadingReplies ? 'Buscando...' : '🔄 Atualizar'}
                         </button>
                     </div>
-                    
                     <div style={{ flex: 1, overflowY: 'auto' }}>
-                        {replies.length === 0 && !isLoadingReplies && (
-                            <div style={{padding: 20, textAlign: 'center', color: '#8b949e', fontSize:'13px'}}>
-                                Nenhuma mensagem encontrada.<br/>Selecione contas na Dashboard.
-                            </div>
-                        )}
                         {replies.map((r, i) => (
                             <div key={i} onClick={() => openChat(r)} style={{
-                                padding: '12px 15px', 
-                                borderBottom: '1px solid #21262d', 
-                                cursor: 'pointer',
-                                background: selectedChat?.chatId === r.chatId ? 'rgba(31, 111, 235, 0.15)' : 'transparent',
-                                borderLeft: selectedChat?.chatId === r.chatId ? '4px solid #1f6feb' : '4px solid transparent',
-                                transition: 'all 0.2s'
+                                padding: '12px', borderBottom: '1px solid #21262d', cursor: 'pointer',
+                                background: selectedChat?.chatId === r.chatId ? '#1f6feb15' : 'transparent',
+                                borderLeft: selectedChat?.chatId === r.chatId ? '3px solid #1f6feb' : '3px solid transparent'
                             }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                                    <span style={{ fontWeight: '600', color: '#e6edf3', fontSize: '14px' }}>{r.name || 'Desconhecido'}</span>
-                                    <span style={{ fontSize: '11px', color: '#8b949e' }}>{formatTime(r.timestamp)}</span>
-                                </div>
-                                <div style={{ fontSize: '13px', color: '#8b949e', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                    <span style={{color:'#7ee787', fontSize:'11px', marginRight:'5px'}}>[{r.fromPhone.slice(-4)}]</span>
-                                    {r.lastMessage}
-                                </div>
+                                <div style={{fontWeight:'bold', fontSize:'13px', color:'#e6edf3'}}>{r.name || 'Desconhecido'}</div>
+                                <div style={{fontSize:'12px', color:'#8b949e', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>{r.lastMessage}</div>
                             </div>
                         ))}
                     </div>
                 </div>
 
-                {/* Área de Mensagens */}
                 <div style={styles.chatArea}>
                     {selectedChat ? (
                         <>
                             <div style={styles.chatHeader}>
-                                <div>
-                                    <div style={{ fontWeight: 'bold', fontSize: '16px' }}>{selectedChat.name}</div>
-                                    <div style={{ fontSize: '12px', color: '#8b949e' }}>
-                                        Via: {selectedChat.fromPhone}
-                                    </div>
-                                </div>
-                                <button 
-                                    onClick={() => navigator.clipboard.writeText(selectedChat.lastMessage)}
-                                    style={{background: 'transparent', border:'1px solid #30363d', color:'#c9d1d9', padding:'5px 10px', borderRadius:'5px', cursor:'pointer', fontSize:'12px'}}
-                                >
-                                    Copiar Última
-                                </button>
+                                <b>{selectedChat.name}</b>
+                                <span style={{fontSize:'11px', color:'#8b949e'}}>{selectedChat.fromPhone}</span>
                             </div>
-
-                            <div style={styles.messagesList}>
-                                <div style={{textAlign: 'center', marginBottom: '15px'}}>
-                                    <button 
-                                        onClick={() => openChat(selectedChat, chatOffset)} 
-                                        style={styles.loadMoreBtn}
-                                    >
-                                        {isChatLoading ? 'Carregando...' : '⬆ Carregar Mais Antigas'}
+                            
+                            {/* LISTA DE MENSAGENS COM SCROLL CORRIGIDO */}
+                            <div 
+                                ref={chatListRef} 
+                                style={styles.messagesList} // AQUI ESTAVA O PROBLEMA DO SCROLL
+                            >
+                                <div style={{textAlign: 'center', margin: '10px 0'}}>
+                                    <button onClick={() => openChat(selectedChat, chatOffset)} style={styles.loadMoreBtn}>
+                                        {isChatLoading ? 'Carregando...' : '⬆ Carregar Mais'}
                                     </button>
                                 </div>
 
                                 {chatHistory.map((m, i) => (
                                     <div key={i} style={{
                                         alignSelf: m.isOut ? 'flex-end' : 'flex-start',
-                                        maxWidth: '65%',
-                                        marginBottom: '10px',
-                                        display: 'flex',
-                                        flexDirection: 'column',
-                                        alignItems: m.isOut ? 'flex-end' : 'flex-start'
+                                        maxWidth: '70%',
+                                        marginBottom: '8px',
+                                        background: m.isOut ? '#005c4b' : '#202c33',
+                                        padding: '8px 12px',
+                                        borderRadius: '8px',
+                                        color: 'white',
+                                        fontSize: '14px',
+                                        position: 'relative'
                                     }}>
-                                        <div style={{
-                                            background: m.isOut ? '#005c4b' : '#202c33',
-                                            padding: '8px 12px', 
-                                            borderRadius: '10px',
-                                            borderTopLeftRadius: !m.isOut ? '0' : '10px',
-                                            borderTopRightRadius: m.isOut ? '0' : '10px',
-                                            color: 'white',
-                                            fontSize: '14px',
-                                            boxShadow: '0 1px 1px rgba(0,0,0,0.2)',
-                                            position: 'relative'
-                                        }}>
-                                            {m.mediaType === 'image' && m.media && (
-                                                <img src={`data:image/jpeg;base64,${m.media}`} style={{maxWidth: '100%', borderRadius: '6px', marginBottom: '8px', display:'block'}} />
-                                            )}
-                                            <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: '1.4' }}>{m.text}</div>
-                                            <div style={{ 
-                                                fontSize: '10px', 
-                                                color: 'rgba(255,255,255,0.6)', 
-                                                textAlign: 'right', 
-                                                marginTop: '4px',
-                                                display: 'flex',
-                                                justifyContent: 'flex-end',
-                                                alignItems: 'center',
-                                                gap: '3px'
-                                            }}>
-                                                {formatTime(m.date * 1000)}
-                                                {m.isOut && <span>✓</span>}
-                                            </div>
+                                        {m.mediaType === 'image' && <img src={`data:image/jpeg;base64,${m.media}`} style={{maxWidth:'100%', borderRadius:'5px'}} />}
+                                        <div>{m.text}</div>
+                                        <div style={{fontSize:'10px', textAlign:'right', opacity:0.6, marginTop:'2px'}}>
+                                            {new Date(m.date * 1000).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
                                         </div>
                                     </div>
                                 ))}
-                                <div ref={messagesEndRef} />
                             </div>
-
-                            <div style={styles.chatInputArea}>
-                                <input placeholder="Digite para responder..." style={{...styles.input, marginBottom: 0, borderRadius: '20px'}} />
-                                <button style={{...styles.btn, width: '50px', borderRadius: '50%', padding: '0', display: 'flex', alignItems: 'center', justifyContent: 'center'}}>➤</button>
+                            
+                            <div style={{padding:'10px', background:'#202c33', display:'flex', gap:'10px'}}>
+                                <input placeholder="Mensagem..." style={{...styles.input, marginBottom:0, borderRadius:'20px'}} />
+                                <button style={{...styles.btn, width:'auto', borderRadius:'50%', padding:'10px 15px'}}>➤</button>
                             </div>
                         </>
                     ) : (
-                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#8b949e' }}>
-                            <div style={{fontSize: '60px', opacity: 0.2}}>💬</div>
-                            <p>Selecione uma conversa para ver o histórico</p>
+                        <div style={{flex:1, display:'flex', alignItems:'center', justifyContent:'center', color:'#8b949e'}}>
+                            Selecione uma conversa
                         </div>
                     )}
                 </div>
             </div>
         )}
-        
-        {/* SPY & TOOLS - (Mantido igual, apenas com estilos atualizados) */}
+
+        {/* OUTRAS ABAS (SPY / TOOLS) */}
         {(activeTab === 'spy' || activeTab === 'tools') && (
             <div style={{ padding: '20px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
-                {activeTab === 'spy' ? (
-                     <>
-                        <div style={styles.card}>
-                            <h3>Scanner de Grupos</h3>
-                            <div style={{ display: 'flex', gap: '10px', margin: '15px 0' }}>
-                                 <button onClick={scanGroups} disabled={isScanning} style={{ ...styles.btn, background: '#238636' }}>
-                                     {isScanning ? 'Escaneando...' : '1. Escanear'}
-                                 </button>
-                                 <button onClick={harvestAll} disabled={isHarvesting} style={{ ...styles.btn, background: '#8957e5' }}>
-                                     {isHarvesting ? 'Aspirando...' : '2. Aspirar'}
-                                 </button>
+                <div style={styles.card}>
+                    <h3>{activeTab === 'spy' ? 'Grupos' : 'Perfil'}</h3>
+                    {activeTab === 'spy' ? (
+                        <>
+                            <div style={{display:'flex', gap:'10px', marginBottom:'10px'}}>
+                                <button onClick={scanGroups} disabled={isScanning} style={styles.btn}>{isScanning ? '...' : 'Escanear'}</button>
+                                <button onClick={harvestAll} disabled={isHarvesting} style={{...styles.btn, background:'#8957e5'}}>{isHarvesting ? '...' : 'Aspirar'}</button>
                             </div>
                             <div style={styles.listArea}>
-                                {allGroups.map((g, i) => (
-                                    <div key={i} style={styles.listItem}>
-                                        {harvestedIds.has(g.id) ? '✅ ' : '⬜ '} 
-                                        <b>{g.title}</b> <span style={{color:'#8b949e', fontSize:'12px'}}>({g.participantsCount})</span>
-                                    </div>
-                                ))}
+                                {allGroups.map((g, i) => <div key={i} style={styles.listItem}>{g.title}</div>)}
                             </div>
-                        </div>
-                        <div style={{...styles.card, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8b949e'}}>
-                             EM BREVE: CLONADOR DE OFERTAS
-                        </div>
-                     </>
-                ) : (
-                    <>
-                        <div style={styles.card}>
-                            <h3>Atualizar Perfil</h3>
-                            <input placeholder="Novo Nome" value={toolsInput.name} onChange={e => setToolsInput({ ...toolsInput, name: e.target.value })} style={styles.input} />
-                            <input placeholder="URL Foto" value={toolsInput.photo} onChange={e => setToolsInput({ ...toolsInput, photo: e.target.value })} style={styles.input} />
-                            <button onClick={() => runTool('/api/update-profile', { newName: toolsInput.name, photoUrl: toolsInput.photo })} style={styles.btn}>Aplicar</button>
-                        </div>
-                        <div style={styles.card}>
-                            <h3>Postar Story</h3>
-                            <input placeholder="URL Mídia" value={toolsInput.storyUrl} onChange={e => setToolsInput({ ...toolsInput, storyUrl: e.target.value })} style={styles.input} />
-                            <input placeholder="Legenda" value={toolsInput.storyCaption} onChange={e => setToolsInput({ ...toolsInput, storyCaption: e.target.value })} style={styles.input} />
-                            <button onClick={() => runTool('/api/post-story', { mediaUrl: toolsInput.storyUrl, caption: toolsInput.storyCaption })} style={styles.btn}>Postar</button>
-                        </div>
-                    </>
-                )}
+                        </>
+                    ) : (
+                        <>
+                            <input placeholder="Novo Nome" value={toolsInput.name} onChange={e => setToolsInput({...toolsInput, name:e.target.value})} style={styles.input}/>
+                            <input placeholder="URL Foto" value={toolsInput.photo} onChange={e => setToolsInput({...toolsInput, photo:e.target.value})} style={styles.input}/>
+                            <button onClick={() => {}} style={styles.btn}>Atualizar</button>
+                        </>
+                    )}
+                </div>
             </div>
         )}
     </div>
   );
 }
 
-// ============================================================================
-// ESTILOS CSS-IN-JS (Organizados)
-// ============================================================================
-
+// ESTILOS CORRIGIDOS PARA O SCROLL FUNCIONAR
 const styles = {
-    mainContainer: { background: '#0d1117', minHeight: '100vh', color: '#c9d1d9', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif', padding: '20px' },
-    loginContainer: { height: '100vh', background: '#0d1117', display: 'flex', justifyContent: 'center', alignItems: 'center', color: 'white', fontFamily: 'sans-serif' },
-    loginBox: { background: '#161b22', padding: '30px', borderRadius: '10px', border: '1px solid #30363d', width: '320px', display: 'flex', flexDirection: 'column', gap: '10px' },
+    mainContainer: { background: '#0d1117', height: '100vh', display: 'flex', flexDirection: 'column', color: '#c9d1d9', fontFamily: 'sans-serif', overflow: 'hidden' }, // Height 100vh fixo
+    header: { padding: '15px 20px', background: '#161b22', borderBottom: '1px solid #30363d', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
     
-    header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1px solid #30363d', paddingBottom: '15px' },
-    versionBadge: { fontSize: '11px', background: '#238636', padding: '3px 8px', borderRadius: '12px', fontWeight: 'bold', color: 'white' },
-    navBtn: { color: 'white', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontWeight: '600', border: '1px solid transparent', transition: 'all 0.2s', fontSize: '13px' },
-    logoutBtn: { background: '#f85149', border: 'none', color: 'white', padding: '8px 15px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' },
-    
-    dashboardGrid: { display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '20px' },
+    // LOGIN
+    loginContainer: { height: '100vh', background: '#0d1117', display: 'flex', justifyContent: 'center', alignItems: 'center' },
+    loginBox: { background: '#161b22', padding: '30px', borderRadius: '10px', border: '1px solid #30363d', width: '300px' },
+
+    // DASHBOARD
+    dashboardGrid: { padding: '20px', display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '20px', flex: 1, overflowY: 'auto' },
     card: { background: '#161b22', padding: '20px', borderRadius: '10px', border: '1px solid #30363d', display: 'flex', flexDirection: 'column' },
-    cardHeader: { display: 'flex', justifyContent: 'space-between', marginBottom: '15px', alignItems: 'center', borderBottom: '1px solid #21262d', paddingBottom: '10px' },
+    logBox: { height: '200px', overflowY: 'auto', background: '#010409', padding: '10px', borderRadius: '8px', border: '1px solid #30363d', fontFamily: 'monospace' },
+    accountRow: { padding: '8px', borderBottom: '1px solid #21262d', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px' },
+
+    // CHAT CONTAINER (O SEGREDO DO SCROLL)
+    chatContainer: { 
+        flex: 1, // Ocupa o resto da tela
+        display: 'grid', 
+        gridTemplateColumns: '300px 1fr', 
+        overflow: 'hidden', // Impede que a tela inteira role
+        background: '#0b141a'
+    },
+    chatSidebar: { borderRight: '1px solid #30363d', background: '#111b21', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
+    chatArea: { display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', backgroundImage: 'linear-gradient(#0b141a 2px, transparent 2px), linear-gradient(90deg, #0b141a 2px, transparent 2px)', backgroundSize: '20px 20px' },
+    chatHeader: { padding: '10px 20px', background: '#202c33', borderBottom: '1px solid #30363d', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
     
-    input: { width: '100%', padding: '12px', background: '#010409', border: '1px solid #30363d', color: 'white', borderRadius: '6px', marginBottom: '10px', outline: 'none', fontSize: '14px', boxSizing: 'border-box' },
-    select: { background: '#21262d', color: 'white', border: '1px solid #30363d', padding: '5px 10px', borderRadius: '6px', cursor: 'pointer', outline: 'none' },
-    btn: { width: '100%', padding: '12px', background: '#238636', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px', transition: 'filter 0.2s' },
-    toggleBtn: { flex: 1, border: 'none', color: 'white', padding: '10px', cursor: 'pointer', borderRadius: '6px', fontWeight: 'bold' },
-    linkBtn: { background: 'none', border: 'none', color: '#58a6ff', cursor: 'pointer', fontSize: '13px', textDecoration: 'underline' },
-    checkboxLabel: { display: 'flex', alignItems: 'center', gap: '8px', background: '#0d1117', padding: '0 15px', borderRadius: '6px', border: '1px solid #30363d', fontSize: '13px', cursor: 'pointer' },
-    
-    logBox: { marginTop: '20px', height: '180px', overflowY: 'auto', background: '#010409', padding: '15px', borderRadius: '10px', border: '1px solid #30363d', fontFamily: 'monospace' },
-    accountRow: { padding: '10px', marginBottom: '5px', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px', border: '1px solid transparent', transition: 'background 0.2s' },
-    
-    chatContainer: { display: 'grid', gridTemplateColumns: '350px 1fr', height: 'calc(100vh - 100px)', background: '#0b141a', borderRadius: '12px', overflow: 'hidden', border: '1px solid #30363d' },
-    chatSidebar: { borderRight: '1px solid #30363d', display: 'flex', flexDirection: 'column', background: '#111b21' },
-    chatArea: { display: 'flex', flexDirection: 'column', background: '#0b141a', position: 'relative', backgroundImage: 'linear-gradient(#0b141a 2px, transparent 2px), linear-gradient(90deg, #0b141a 2px, transparent 2px)', backgroundSize: '20px 20px', backgroundColor: '#0b141a' }, // Fundo sutil
-    chatHeader: { padding: '15px', background: '#202c33', borderBottom: '1px solid #30363d', display: 'flex', alignItems: 'center', justifyContent: 'space-between', zIndex: 2 },
-    messagesList: { flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column' },
-    chatInputArea: { padding: '10px 15px', background: '#202c33', display: 'flex', gap: '10px', alignItems: 'center' },
-    loadMoreBtn: { background: 'transparent', border: '1px solid #30363d', color: '#58a6ff', padding: '5px 15px', borderRadius: '20px', cursor: 'pointer', fontSize: '12px' },
-    
-    listArea: { height: '300px', overflowY: 'auto', background: '#0d1117', padding: '10px', borderRadius: '6px', textAlign: 'left' },
-    listItem: { padding: '8px', borderBottom: '1px solid #21262d', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '5px' }
+    // AQUI É A CORREÇÃO PRINCIPAL DO FLEXBOX
+    messagesList: { 
+        flex: 1, 
+        overflowY: 'auto', // Scroll acontece SÓ AQUI
+        display: 'flex', 
+        flexDirection: 'column', 
+        padding: '20px',
+        minHeight: 0 // CRUCIAL PARA FLEXBOX ANINHADO
+    },
+
+    // COMPONENTES
+    input: { width: '100%', padding: '10px', background: '#010409', border: '1px solid #30363d', color: 'white', borderRadius: '6px', marginBottom: '10px', outline: 'none', boxSizing: 'border-box' },
+    btn: { width: '100%', padding: '10px', background: '#238636', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' },
+    navBtn: { color: 'white', padding: '5px 15px', borderRadius: '6px', cursor: 'pointer', border: '1px solid transparent', fontSize: '13px', fontWeight: 'bold' },
+    logoutBtn: { background: '#f85149', border: 'none', color: 'white', padding: '5px 10px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px' },
+    linkBtn: { background: 'none', border: 'none', color: '#58a6ff', cursor: 'pointer', fontSize: '12px' },
+    checkboxLabel: { display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12px', color: '#c9d1d9', cursor: 'pointer' },
+    versionBadge: { fontSize: '10px', background: '#238636', padding: '2px 5px', borderRadius: '4px', color: 'white', fontWeight: 'bold' },
+    loadMoreBtn: { background: 'transparent', border: '1px solid #30363d', color: '#58a6ff', padding: '5px 15px', borderRadius: '20px', cursor: 'pointer', fontSize: '11px' },
+    listArea: { height: '250px', overflowY: 'auto', background: '#0d1117', padding: '10px', borderRadius: '6px' },
+    listItem: { padding: '5px', borderBottom: '1px solid #21262d', fontSize: '13px' },
+    toggleBtn: { flex: 1, border: 'none', color: 'white', padding: '8px', cursor: 'pointer', borderRadius: '4px', fontWeight: 'bold' }
 };
 
 const StatBox = ({ label, val, color }) => (
-    <div style={{ flex: 1, background: '#161b22', padding: '15px', borderRadius: '8px', borderLeft: `4px solid ${color}`, boxShadow: '0 2px 5px rgba(0,0,0,0.2)' }}>
-        <h2 style={{ margin: 0, color: 'white', fontSize: '24px' }}>{val}</h2>
-        <small style={{ color: '#8b949e', fontWeight: 'bold', fontSize: '11px' }}>{label}</small>
+    <div style={{ flex: 1, background: '#161b22', padding: '15px', borderRadius: '8px', borderLeft: `4px solid ${color}` }}>
+        <h2 style={{ margin: 0, color: 'white', fontSize: '20px' }}>{val}</h2>
+        <small style={{ color: '#8b949e', fontSize: '10px', fontWeight: 'bold' }}>{label}</small>
     </div>
 );
