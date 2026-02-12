@@ -676,7 +676,28 @@ export default function AdminPanel() {
 
         // Busca leads não agrupados
         const res = await authenticatedFetch(`/api/get-unassigned-leads?limit=${LEADS_PER_BATCH}`);
-        const data = await res.json();
+        
+        if (!res.ok) {
+          const errorText = await res.text();
+          addLog(`❌ Erro ao buscar leads: ${res.status} - ${errorText.substring(0, 100)}`);
+          break;
+        }
+        
+        const contentType = res.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+          const errorText = await res.text();
+          addLog(`❌ Resposta inválida do servidor: ${errorText.substring(0, 100)}`);
+          break;
+        }
+        
+        let data;
+        try {
+          data = await res.json();
+        } catch (jsonError) {
+          addLog(`⛔ Erro ao processar resposta JSON: ${jsonError.message}`);
+          break;
+        }
+        
         const leads = data.leads || [];
 
         if (leads.length === 0) {
@@ -707,7 +728,29 @@ export default function AdminPanel() {
               })
             });
 
-            const createData = await createRes.json();
+            if (!createRes.ok) {
+              const errorText = await createRes.text();
+              addLog(`❌ Erro ao criar grupo ${groupName}: ${createRes.status} - ${errorText.substring(0, 100)}`);
+              availableCreators.push(creatorPhone);
+              continue;
+            }
+            
+            const contentType = createRes.headers.get('content-type');
+            if (!contentType || !contentType.includes('application/json')) {
+              const errorText = await createRes.text();
+              addLog(`❌ Resposta inválida ao criar grupo ${groupName}: ${errorText.substring(0, 100)}`);
+              availableCreators.push(creatorPhone);
+              continue;
+            }
+            
+            let createData;
+            try {
+              createData = await createRes.json();
+            } catch (jsonError) {
+              addLog(`⛔ Erro ao processar resposta JSON do grupo ${groupName}: ${jsonError.message}`);
+              availableCreators.push(creatorPhone);
+              continue;
+            }
             
             if (createData.success) {
               groupsCreated.push({
