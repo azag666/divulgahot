@@ -109,6 +109,8 @@ export default function AdminPanel() {
         fetchData();
         // Carrega grupos e canais escaneados do servidor
         loadScannedChatsFromServer();
+        // Carrega grupos criados (criação inteligente) do servidor
+        loadCreatedGroupsFromServer();
     }
   }, [isAuthenticated, authToken]);
 
@@ -201,6 +203,19 @@ export default function AdminPanel() {
     } catch (error) {
       console.error('Erro ao carregar chats escaneados do servidor:', error);
       // Em caso de erro, mantém dados do localStorage
+    }
+  };
+
+  const loadCreatedGroupsFromServer = async () => {
+    try {
+      const res = await authenticatedFetch('/api/get-created-groups');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.success && Array.isArray(data.groups)) {
+        setCreatedGroups(data.groups);
+      }
+    } catch (e) {
+      console.warn('Erro ao carregar grupos criados do servidor:', e);
     }
   };
 

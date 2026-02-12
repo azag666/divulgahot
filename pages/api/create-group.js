@@ -77,7 +77,8 @@ export default async function handler(req, res) {
               creator_phone: creatorPhone,
               group_id: newChatId.toString(),
               group_name: groupName,
-              created_at: new Date()
+              created_at: new Date(),
+              ...(req.userId && { owner_id: req.userId })
             });
           } catch (dbErr) {
             console.warn('Erro ao salvar registro do grupo:', dbErr.message);
