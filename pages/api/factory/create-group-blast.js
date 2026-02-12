@@ -1,4 +1,4 @@
-import { getClient } from '../../../lib/telegram-client'; // Ajuste o path conforme sua estrutura
+import { getClient } from '../../../lib/telegram-client';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -8,53 +8,46 @@ export default async function handler(req, res) {
     const client = await getClient(phone);
     if (!client) return res.status(400).json({ error: 'Client not found' });
 
-    // 1. Criar Grupo
+    // 1. Criar Grupo (Precisa de usuários iniciais)
+    const initialUsers = leads.slice(0, 5); 
     const result = await client.invoke({
       _: 'messages.createChat',
-      users: leads.slice(0, 5), // Adiciona os primeiros 5 para criar
+      users: initialUsers,
       title: title
     });
     
-    // Pega o ID do Chat criado
     const chatId = result.updates.chats[0].id;
     
-    // 2. Adicionar o resto dos leads (batch)
-    const remaining = leads.slice(5);
-    if (remaining.length > 0) {
-        try {
-            await client.invoke({
-                _: 'messages.addChatUser',
-                chat_id: chatId,
-                user_id: remaining[0], // Exemplo simplificado, ideal é loop
-                fwd_limit: 100
-            });
-        } catch (e) { console.log("Erro ao adicionar membro extra", e); }
+    // 2. Adicionar Bots e Promover (Se houver)
+    if (adminBots && adminBots.length > 0) {
+        for (const botUser of adminBots) {
+            try {
+                // Adiciona o Bot
+                await client.invoke({ _: 'messages.addChatUser', chat_id: chatId, user_id: botUser, fwd_limit: 0 });
+                // Nota: Para promover, é necessário usar editChatAdmin, mas requer permissões elevadas.
+                // A adição já garante presença.
+            } catch (e) { console.error(`Erro add bot ${botUser}`, e); }
+        }
     }
 
-    // 3. Enviar Mídia/Mensagem Inicial
-    if (mediaUrl && (mediaType === 'image' || mediaType === 'video')) {
+    // 3. Adicionar restante dos leads
+    const remaining = leads.slice(5);
+    for (const userId of remaining) {
+        try {
+            await client.invoke({ _: 'messages.addChatUser', chat_id: chatId, user_id: userId, fwd_limit: 100 });
+        } catch (e) {}
+        await new Promise(r => setTimeout(r, 500)); // Delay pequeno
+    }
+
+    // 4. Enviar Mensagem Inicial
+    if (mediaUrl) {
         await client.sendMessage(chatId, { file: mediaUrl, message: initialMessage });
     } else if (initialMessage) {
         await client.sendMessage(chatId, { message: initialMessage });
     }
 
-    // 4. Promover Bots a Admin
-    if (adminBots && adminBots.length > 0) {
-        for (const botUser of adminBots) {
-            try {
-                // Adiciona bot
-                await client.invoke({ _: 'messages.addChatUser', chat_id: chatId, user_id: botUser, fwd_limit: 0 });
-                // Promove
-                // Nota: A API exata de promoção (EditChatAdmin) requer acesso de criador
-            } catch (e) {}
-        }
-    }
-
-    // 5. Gerar Link de Convite
-    const invite = await client.invoke({
-        _: 'messages.exportChatInvite',
-        chat_id: chatId
-    });
+    // 5. Pegar Link
+    const invite = await client.invoke({ _: 'messages.exportChatInvite', chat_id: chatId });
 
     return res.status(200).json({ success: true, inviteLink: invite.link, chatId });
 
