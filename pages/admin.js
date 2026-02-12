@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef, useLayoutEffect } from 'react';
 
 // ============================================================================
-// HOTTRACK V21 - FACTORY MASTER
-// - Visualizador de Grupos Criados
-// - Envio de Mídia (Vídeo/Áudio/Foto) nos Grupos
-// - Auto-Admin para Bots Criados
-// - Definição de Foto Padrão na Criação de Bots
+// HOTTRACK V22 - ULTIMATE FACTORY
+// - Interface Limpa e "One-Click"
+// - Criação de Grupos em Ciclo (Round-Robin de Contas)
+// - Disparo Inicial Automático (Oferta de Boas-vindas)
+// - Tabela em Tempo Real dos Ativos Criados
 // ============================================================================
 
 export default function AdminPanel() {
@@ -16,63 +16,52 @@ export default function AdminPanel() {
   const [loginMode, setLoginMode] = useState('user');
   const [credentials, setCredentials] = useState({ user: '', pass: '', token: '' });
 
-  // --- UI & NAVEGAÇÃO ---
+  // --- NAVEGAÇÃO ---
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [logs, setLogs] = useState([]);
+  const [factoryTab, setFactoryTab] = useState('groups'); // groups | bots
   
   // --- DADOS ---
   const [sessions, setSessions] = useState([]);
   const [stats, setStats] = useState({ total: 0, pending: 0, sent: 0 });
   const [selectedPhones, setSelectedPhones] = useState(new Set());
-
-  // --- DISPARO & MODELOS ---
+  const [logs, setLogs] = useState([]);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [config, setConfig] = useState({ msg: '', imgUrl: '', useRandom: true });
   const stopProcessRef = useRef(false);
+
+  // --- ESTADOS DA FÁBRICA DE GRUPOS ---
+  const [groupConfig, setGroupConfig] = useState({
+      baseName: 'Grupo Promo VIP',
+      amountToCreate: 5,
+      leadsPerGroup: 40,
+      initialMessage: '',
+      mediaUrl: '',
+      mediaType: 'text' // text, image, video
+  });
+  const [createdGroups, setCreatedGroups] = useState([]); // Lista visual dos grupos feitos
+
+  // --- ESTADOS DA FÁBRICA DE BOTS ---
+  const [botConfig, setBotConfig] = useState({
+      baseName: 'Atendimento',
+      amount: 3,
+      setPhoto: ''
+  });
+  const [createdBots, setCreatedBots] = useState([]);
 
   // --- INBOX ---
   const [replies, setReplies] = useState([]);
-  const [isLoadingReplies, setIsLoadingReplies] = useState(false);
   const [selectedChat, setSelectedChat] = useState(null);
   const [chatHistory, setChatHistory] = useState([]);
-  const chatListRef = useRef(null); 
-  const [shouldScrollToBottom, setShouldScrollToBottom] = useState(true);
+  const chatListRef = useRef(null);
 
-  // --- FACTORY & SPY ---
+  // --- SPY ---
   const [allGroups, setAllGroups] = useState([]);
-  const [harvestedIds, setHarvestedIds] = useState(new Set());
-  const [isScanning, setIsScanning] = useState(false);
-  const [isHarvesting, setIsHarvesting] = useState(false);
-  
-  // --- NOVOS ESTADOS DA FACTORY V21 ---
-  const [createdGroupsList, setCreatedGroupsList] = useState([]); // Visualizador de Grupos
-  
-  const [groupFactory, setGroupFactory] = useState({ 
-      baseName: 'Grupo VIP', 
-      leadsPerGroup: 50, 
-      message: '',
-      mediaUrl: '',
-      mediaType: 'text', // text, image, video, audio
-      promoteBots: true 
-  });
-
-  const [botFactory, setBotFactory] = useState({ 
-      baseName: 'Atendimento', 
-      amount: 5, 
-      defaultPhoto: '', // Foto padrão para todos os bots
-      createdBots: [] 
-  });
 
   // ==========================================================================
   // INICIALIZAÇÃO
   // ==========================================================================
-
   useEffect(() => {
       const token = localStorage.getItem('authToken');
-      if (token) { 
-          setAuthToken(token); 
-          setIsAuthenticated(true); 
-      }
+      if (token) { setAuthToken(token); setIsAuthenticated(true); }
       const savedGroups = localStorage.getItem('godModeGroups');
       if (savedGroups) setAllGroups(JSON.parse(savedGroups));
   }, []);
@@ -80,209 +69,173 @@ export default function AdminPanel() {
   useEffect(() => {
       if (isAuthenticated) {
           fetchData(); 
-          const intervalId = setInterval(() => {
-              const t = Date.now();
-              apiCall(`/api/list-sessions?t=${t}`).then(r => r?.ok && r.json().then(d => setSessions(d.sessions || [])));
-              apiCall(`/api/stats?t=${t}`).then(r => r?.ok && r.json().then(d => setStats(d)));
-          }, 5000);
+          const intervalId = setInterval(fetchData, 4000);
           return () => clearInterval(intervalId);
       }
   }, [isAuthenticated]);
 
-  useLayoutEffect(() => {
-      if (chatListRef.current && shouldScrollToBottom) {
-          chatListRef.current.scrollTop = chatListRef.current.scrollHeight;
-      }
-  }, [chatHistory, shouldScrollToBottom, selectedChat]);
-
-  // ==========================================================================
-  // API HELPER
-  // ==========================================================================
-
-  const apiCall = async (endpoint, body) => {
-      try {
-          const response = await fetch(endpoint, {
-              method: body ? 'POST' : 'GET',
-              headers: { 
-                  'Content-Type': 'application/json', 
-                  'Authorization': `Bearer ${authToken}` 
-              },
-              body: body ? JSON.stringify(body) : null
-          });
-          if (response.status === 401) { setIsAuthenticated(false); return null; }
-          return response;
-      } catch (error) { return { ok: false }; }
-  };
-
-  const addLog = (message) => {
-      const time = new Date().toLocaleTimeString();
-      setLogs(prev => [`[${time}] ${message}`, ...prev].slice(0, 300));
-  };
-
   const fetchData = async () => {
       const t = Date.now();
-      const sRes = await apiCall(`/api/list-sessions?t=${t}`);
-      if (sRes?.ok) {
-          const data = await sRes.json();
-          setSessions(data.sessions || []);
-      }
-      const stRes = await apiCall(`/api/stats?t=${t}`);
-      if (stRes?.ok) setStats(await stRes.json());
-      const hRes = await apiCall('/api/get-harvested');
-      if (hRes?.ok) {
-          const data = await hRes.json();
-          if (data.harvestedIds) setHarvestedIds(new Set(data.harvestedIds));
-      }
+      try {
+          const sRes = await fetch(`/api/list-sessions?t=${t}`, { headers: { 'Authorization': `Bearer ${authToken}` } });
+          const sData = await sRes.json();
+          if (sData.sessions) setSessions(sData.sessions);
+
+          const stRes = await fetch(`/api/stats?t=${t}`, { headers: { 'Authorization': `Bearer ${authToken}` } });
+          const stData = await stRes.json();
+          setStats(stData);
+      } catch (e) {}
+  };
+
+  const addLog = (msg) => {
+      const time = new Date().toLocaleTimeString();
+      setLogs(prev => [`[${time}] ${msg}`, ...prev].slice(0, 200));
   };
 
   // ==========================================================================
-  // 🏭 BOT FACTORY V2 (Criação + Foto Automática)
+  // 🏭 ENGINE: FÁBRICA DE GRUPOS (OTIMIZADA)
   // ==========================================================================
-
-  const runBotFactory = async () => {
-      if (selectedPhones.size === 0) return alert('Selecione uma conta "Mãe" para falar com o BotFather!');
-      if (!botFactory.baseName) return alert('Defina um nome base.');
-      
-      const creatorPhone = Array.from(selectedPhones)[0]; 
-      setIsProcessing(true);
-      addLog(`🤖 Iniciando Fábrica de Bots com a conta: ${creatorPhone}`);
-
-      let newBots = [...botFactory.createdBots];
-
-      for (let i = 0; i < botFactory.amount; i++) {
-          const randomSuffix = Math.floor(Math.random() * 9999);
-          const botName = `${botFactory.baseName} ${randomSuffix}`;
-          const botUser = `${botFactory.baseName.replace(/\s+/g, '')}_${randomSuffix}_bot`;
-
-          addLog(`⚙️ Criando bot ${i+1}/${botFactory.amount}: ${botUser}...`);
-
-          try {
-              // Chama endpoint que cria e já seta a foto se fornecida
-              const res = await apiCall('/api/factory/create-bot', {
-                  phone: creatorPhone,
-                  name: botName,
-                  username: botUser,
-                  photoUrl: botFactory.defaultPhoto // V21: Envia foto na criação
-              });
-              const data = await res.json();
-
-              if (data.success && data.token) {
-                  addLog(`✅ Bot Criado! Token: ${data.token}`);
-                  newBots.push({ token: data.token, username: botUser });
-                  setBotFactory(prev => ({ ...prev, createdBots: newBots }));
-              } else {
-                  addLog(`❌ Falha ao criar ${botUser}: ${data.error}`);
-              }
-          } catch (e) {
-              addLog(`❌ Erro de conexão.`);
-          }
-          
-          await new Promise(r => setTimeout(r, 6000)); // Delay para evitar flood do BotFather
-      }
-      setIsProcessing(false);
-      addLog('🏁 Fábrica de Bots finalizada.');
-  };
-
-  // ==========================================================================
-  // 📢 GROUP LAUNCHER V2 (Mídia + Auto-Admin)
-  // ==========================================================================
-
-  const startGroupLauncher = async () => {
-      if (selectedPhones.size === 0) return alert('Selecione contas criadoras!');
+  const runGroupFactory = async () => {
+      if (selectedPhones.size === 0) return alert('Selecione as contas que criarão os grupos!');
       setIsProcessing(true);
       stopProcessRef.current = false;
-      addLog('🚀 INICIANDO GROUP LAUNCHER V21');
+      addLog('🚀 INICIANDO CICLO DE CRIAÇÃO DE GRUPOS...');
 
       const creators = Array.from(selectedPhones);
-      
-      while (!stopProcessRef.current) {
-          // 1. Busca leads
-          const leadsRes = await apiCall(`/api/get-campaign-leads?limit=${groupFactory.leadsPerGroup}&t=${Date.now()}`);
-          const leadsData = await leadsRes?.json();
-          const leads = leadsData?.leads || [];
+      let createdCount = 0;
+
+      while (createdCount < groupConfig.amountToCreate && !stopProcessRef.current) {
+          // 1. Seleciona Criador (Rodízio)
+          const creator = creators[createdCount % creators.length];
+          const currentGroupName = `${groupConfig.baseName} #${Math.floor(Math.random() * 9999)}`;
+
+          addLog(`🏗️ (${createdCount + 1}/${groupConfig.amountToCreate}) Criando: ${currentGroupName} via ${creator}...`);
+
+          // 2. Busca Leads Frescos
+          let leads = [];
+          try {
+              const leadRes = await fetch(`/api/get-campaign-leads?limit=${groupConfig.leadsPerGroup}`, { headers: { 'Authorization': `Bearer ${authToken}` } });
+              const leadData = await leadRes.json();
+              leads = leadData.leads || [];
+          } catch (e) { addLog('❌ Erro ao buscar leads.'); }
 
           if (leads.length === 0) {
-              addLog('✅ Sem mais leads.');
+              addLog('⚠️ Sem leads disponíveis no banco.');
               break;
           }
 
-          // 2. Escolhe criador
-          const creator = creators[Math.floor(Math.random() * creators.length)];
-          const groupName = `${groupFactory.baseName} #${Math.floor(Math.random()*1000)}`;
-
-          addLog(`🏗️ Criando: ${groupName}...`);
-
+          // 3. Executa Criação + Adição + Disparo Inicial
           try {
-              // Prepara bots para promover (pega os últimos criados)
-              const botsToPromote = groupFactory.promoteBots ? botFactory.createdBots.map(b => b.username) : [];
-
-              const res = await apiCall('/api/factory/create-group-blast', {
-                  phone: creator,
-                  title: groupName,
-                  leads: leads.map(l => l.user_id),
-                  message: groupFactory.message,
-                  // V21: Suporte a Mídia e Admin
-                  mediaUrl: groupFactory.mediaUrl,
-                  mediaType: groupFactory.mediaType,
-                  adminBots: botsToPromote 
+              const res = await fetch('/api/factory/create-group-blast', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
+                  body: JSON.stringify({
+                      phone: creator,
+                      title: currentGroupName,
+                      leads: leads.map(l => l.user_id),
+                      initialMessage: groupConfig.initialMessage,
+                      mediaUrl: groupConfig.mediaUrl,
+                      mediaType: groupConfig.mediaType
+                  })
               });
               const data = await res.json();
 
               if (data.success) {
-                  addLog(`✅ Grupo criado: ${data.inviteLink}`);
+                  addLog(`✅ Grupo Criado! Link: ${data.inviteLink}`);
                   
-                  // Atualiza lista visual de grupos
-                  setCreatedGroupsList(prev => [{ name: groupName, link: data.inviteLink, time: new Date().toLocaleTimeString() }, ...prev]);
-                  
-                  // Atualiza Stats
-                  setStats(prev => ({ ...prev, sent: prev.sent + leads.length, pending: prev.pending - leads.length }));
+                  // Adiciona à lista visual
+                  setCreatedGroups(prev => [{
+                      name: currentGroupName,
+                      link: data.inviteLink,
+                      members: leads.length,
+                      creator: creator,
+                      status: 'Ativo & Disparado'
+                  }, ...prev]);
+
+                  // Atualiza Stats Globais
+                  setStats(prev => ({ ...prev, sent: prev.sent + leads.length }));
               } else {
-                  addLog(`❌ Erro grupo: ${data.error}`);
+                  addLog(`❌ Falha na criação: ${data.error}`);
+                  // Se falhar, espera mais tempo antes de tentar o próximo
                   await new Promise(r => setTimeout(r, 10000));
               }
 
           } catch (e) { console.error(e); }
 
-          await new Promise(r => setTimeout(r, 15000));
+          createdCount++;
+          // Delay de segurança entre grupos para não banir a conta
+          await new Promise(r => setTimeout(r, 20000)); 
       }
 
       setIsProcessing(false);
-      addLog('🏁 Launcher finalizado.');
+      addLog('🏁 Ciclo de Grupos Finalizado.');
   };
 
   // ==========================================================================
-  // INBOX E OUTRAS FUNÇÕES (MANTIDAS)
+  // 🤖 ENGINE: FÁBRICA DE BOTS (SIMPLIFICADA)
   // ==========================================================================
+  const runBotFactory = async () => {
+      if (selectedPhones.size === 0) return alert('Selecione uma conta para falar com o BotFather!');
+      const creator = Array.from(selectedPhones)[0];
+      
+      setIsProcessing(true);
+      addLog('🤖 Iniciando conversas com @BotFather...');
 
-  const startEngine = async () => { alert("Utilize o Group Launcher para máxima eficiência!"); };
-  
-  const coletarOferta = (msg) => {
-      setConfig({ ...config, msg: msg.text || '' });
-      setGroupFactory({ ...groupFactory, message: msg.text || '' });
-      alert("♻️ Oferta copiada para Fábrica de Grupos!");
+      for (let i = 0; i < botConfig.amount; i++) {
+          const suffix = Math.floor(Math.random() * 99999);
+          const name = `${botConfig.baseName} ${suffix}`;
+          const username = `${botConfig.baseName.replace(/\s+/g,'')}_${suffix}_bot`;
+
+          addLog(`⚙️ Criando bot: @${username}...`);
+
+          try {
+              const res = await fetch('/api/factory/create-bot', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
+                  body: JSON.stringify({
+                      phone: creator,
+                      name: name,
+                      username: username,
+                      photoUrl: botConfig.setPhoto
+                  })
+              });
+              const data = await res.json();
+
+              if (data.success) {
+                  addLog(`✅ Bot Criado! Token: ${data.token}`);
+                  setCreatedBots(prev => [{ username, token: data.token }, ...prev]);
+              } else {
+                  addLog(`❌ Erro BotFather: ${data.error}`);
+              }
+          } catch (e) {}
+
+          await new Promise(r => setTimeout(r, 8000)); // BotFather exige pausas
+      }
+      setIsProcessing(false);
+      addLog('🏁 Bots criados.');
   };
 
+  // ==========================================================================
+  // INBOX & SPY (Lógica Auxiliar)
+  // ==========================================================================
   const loadInbox = async () => {
-      if (selectedPhones.size === 0) {
-          const online = sessions.filter(s => s.is_active).map(s => s.phone_number);
-          if (online.length > 0) setSelectedPhones(new Set(online));
-      }
-      setIsLoadingReplies(true);
-      setReplies([]);
-      const phones = Array.from(selectedPhones.size > 0 ? selectedPhones : sessions.map(s=>s.phone_number));
-      let all = [];
-      for (let i = 0; i < phones.length; i += 5) {
-          const batch = phones.slice(i, i + 5);
-          const results = await Promise.all(batch.map(p => apiCall('/api/spy/check-replies', { phone: p }).then(r => r.json()).catch(() => ({}))));
-          results.forEach(r => r.replies && all.push(...r.replies));
-      }
-      setReplies(all.sort((a, b) => b.timestamp - a.timestamp));
-      setIsLoadingReplies(false);
+    if(selectedPhones.size===0) {
+        const active = sessions.filter(s=>s.is_active).map(s=>s.phone_number);
+        if(active.length>0) setSelectedPhones(new Set(active));
+    }
+    const phones = Array.from(selectedPhones.size > 0 ? selectedPhones : sessions.map(s=>s.phone_number));
+    let all = [];
+    for(const p of phones) {
+        const r = await fetch('/api/spy/check-replies', { method:'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` }, body: JSON.stringify({phone:p})});
+        const d = await r.json();
+        if(d.replies) all.push(...d.replies);
+    }
+    setReplies(all);
   };
 
-  const openChat = async (r, offset = 0) => {
+  const openChat = async (r) => {
       setSelectedChat(r);
-      const res = await apiCall('/api/spy/get-history', { phone: r.fromPhone, chatId: r.chatId, limit: 20, offset });
+      const res = await fetch('/api/spy/get-history', { method:'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` }, body: JSON.stringify({phone:r.fromPhone, chatId:r.chatId, limit:20})});
       const d = await res.json();
       setChatHistory(d.history ? d.history.reverse() : []);
   };
@@ -291,211 +244,180 @@ export default function AdminPanel() {
   // RENDERIZAÇÃO
   // ==========================================================================
 
-  const handleLogin = async (e) => {
-      e.preventDefault();
-      const endpoint = loginMode === 'user' ? '/api/login' : '/api/admin-login';
-      const body = loginMode === 'user' ? { username: credentials.user, password: credentials.pass } : { password: credentials.token };
-      try {
-          const res = await fetch(endpoint, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
-          const data = await res.json();
-          if (data.success) { setAuthToken(data.token); setIsAuthenticated(true); localStorage.setItem('authToken', data.token); }
-          else alert(data.error);
-      } catch (e) {}
-  };
-
   if (!isAuthenticated) return (
-      <div style={styles.loginContainer}><form onSubmit={handleLogin} style={styles.loginBox}>
-          <h2 style={{textAlign:'center',color:'white'}}>HOTTRACK V21</h2>
-          <input type="password" placeholder="Token" onChange={e=>setCredentials({...credentials, token:e.target.value})} style={styles.input}/>
-          <button style={styles.btn}>ENTRAR</button>
-      </form></div>
+      <div style={styles.loginContainer}>
+          <div style={styles.loginBox}>
+              <h2 style={{color:'white', textAlign:'center'}}>HOTTRACK V22</h2>
+              <input type="password" placeholder="Token de Acesso" onChange={e => setCredentials({...credentials, token: e.target.value})} style={styles.input} />
+              <button onClick={() => { if(credentials.token) { setAuthToken(credentials.token); setIsAuthenticated(true); localStorage.setItem('authToken', credentials.token); }}} style={styles.btn}>ACESSAR SISTEMA</button>
+          </div>
+      </div>
   );
 
   return (
     <div style={styles.mainContainer}>
         {/* HEADER */}
         <div style={styles.header}>
-            <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
-                <h2 style={{ margin: 0, color: 'white' }}>HOTTRACK</h2>
-                <span style={styles.versionBadge}>V21 FACTORY</span>
+            <div style={{display:'flex', alignItems:'center', gap:10}}>
+                <h2 style={{margin:0, color:'white'}}>HOTTRACK</h2>
+                <span style={styles.badge}>V22 ULTIMATE</span>
             </div>
-            <div style={{ display: 'flex', gap: '10px' }}>
-                {['dashboard', 'inbox', 'factory', 'spy'].map(tab => (
-                    <button key={tab} onClick={() => { setActiveTab(tab); if(tab === 'inbox') loadInbox(); }} style={{
-                        ...styles.navBtn,
-                        background: activeTab === tab ? '#1f6feb' : 'transparent', 
-                        borderColor: activeTab === tab ? '#1f6feb' : '#30363d'
-                    }}>{tab.toUpperCase()}</button>
-                ))}
+            <div style={{display:'flex', gap:10}}>
+                <button onClick={() => setActiveTab('dashboard')} style={navBtn(activeTab==='dashboard')}>DASHBOARD</button>
+                <button onClick={() => setActiveTab('factory')} style={navBtn(activeTab==='factory')}>🏭 FÁBRICA (AUTO)</button>
+                <button onClick={() => {setActiveTab('inbox'); loadInbox();}} style={navBtn(activeTab==='inbox')}>INBOX</button>
             </div>
             <button onClick={() => setIsAuthenticated(false)} style={styles.logoutBtn}>SAIR</button>
         </div>
 
-        {/* FACTORY TAB */}
+        {/* --- ABA FÁBRICA (FACTORY) --- */}
         {activeTab === 'factory' && (
-            <div style={{ padding: 25, display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: 25, flex: 1, overflowY: 'auto' }}>
+            <div style={{display:'grid', gridTemplateColumns:'300px 1fr', gap:20, padding:20, flex:1, overflowY:'hidden'}}>
                 
-                {/* ESQUERDA: GROUP LAUNCHER */}
-                <div style={styles.card}>
-                    <h3 style={styles.cardTitle}>🚀 Mass Group Launcher (Mídia + Admin)</h3>
+                {/* MENU LATERAL DA FÁBRICA */}
+                <div style={{background:'#161b22', padding:20, borderRadius:10, border:'1px solid #30363d', display:'flex', flexDirection:'column', gap:10}}>
+                    <button onClick={() => setFactoryTab('groups')} style={subTabBtn(factoryTab==='groups')}>📢 FÁBRICA DE GRUPOS</button>
+                    <button onClick={() => setFactoryTab('bots')} style={subTabBtn(factoryTab==='bots')}>🤖 FÁBRICA DE BOTS</button>
                     
-                    <div style={{marginBottom:15}}>
-                        <label style={styles.label}>Configuração Básica</label>
-                        <input placeholder="Nome Base (ex: Ofertas VIP)" value={groupFactory.baseName} onChange={e => setGroupFactory({...groupFactory, baseName: e.target.value})} style={styles.input} />
-                        <input type="number" placeholder="Leads p/ Grupo (ex: 50)" value={groupFactory.leadsPerGroup} onChange={e => setGroupFactory({...groupFactory, leadsPerGroup: e.target.value})} style={styles.input} />
-                    </div>
-
-                    <div style={{marginBottom:15}}>
-                        <label style={styles.label}>Mensagem e Mídia</label>
-                        <div style={{display:'flex', gap:10}}>
-                            <select value={groupFactory.mediaType} onChange={e => setGroupFactory({...groupFactory, mediaType: e.target.value})} style={{...styles.select, width:100}}>
-                                <option value="text">Texto</option>
-                                <option value="image">Imagem</option>
-                                <option value="video">Vídeo</option>
-                                <option value="audio">Áudio</option>
-                            </select>
-                            <input placeholder="URL da Mídia (se houver)" value={groupFactory.mediaUrl} onChange={e => setGroupFactory({...groupFactory, mediaUrl: e.target.value})} style={{...styles.input, flex:1, marginBottom:0}} />
-                        </div>
-                        <textarea placeholder="Legenda/Texto..." value={groupFactory.message} onChange={e => setGroupFactory({...groupFactory, message: e.target.value})} style={{...styles.input, height:80, marginTop:10}} />
-                    </div>
-
-                    <div style={{marginBottom:15}}>
-                         <label style={styles.checkboxLabel}>
-                            <input type="checkbox" checked={groupFactory.promoteBots} onChange={e => setGroupFactory({...groupFactory, promoteBots: e.target.checked})} /> 
-                            Adicionar e Promover Bots Criados a Admin?
-                        </label>
-                    </div>
-
-                    {!isProcessing ? 
-                        <button onClick={startGroupLauncher} style={styles.btn}>INICIAR CICLO</button> :
-                        <button onClick={() => stopProcessRef.current = true} style={{...styles.btn, background:'#f85149'}}>PARAR CICLO</button>
-                    }
-
-                    {/* VISUALIZADOR DE GRUPOS CRIADOS */}
-                    <div style={{marginTop:20, borderTop:'1px solid #30363d', paddingTop:10}}>
-                        <h4 style={{margin:'0 0 10px 0'}}>Grupos Criados Recentemente</h4>
-                        <div style={{height:150, overflowY:'auto', background:'#010409', borderRadius:8, padding:5}}>
-                            {createdGroupsList.map((g, i) => (
-                                <div key={i} style={{padding:8, borderBottom:'1px solid #21262d', fontSize:13, display:'flex', justifyContent:'space-between'}}>
-                                    <span>{g.name}</span>
-                                    <a href={g.link} target="_blank" style={{color:'#58a6ff', textDecoration:'none'}}>{g.link}</a>
+                    <div style={{marginTop:20, borderTop:'1px solid #30363d', paddingTop:20}}>
+                        <h4 style={{marginTop:0}}>Contas Operadoras</h4>
+                        <div style={{maxHeight:300, overflowY:'auto'}}>
+                            {sessions.map(s => (
+                                <div key={s.phone_number} onClick={() => {
+                                    const n = new Set(selectedPhones);
+                                    n.has(s.phone_number) ? n.delete(s.phone_number) : n.add(s.phone_number);
+                                    setSelectedPhones(n);
+                                }} style={{padding:8, fontSize:13, cursor:'pointer', color: selectedPhones.has(s.phone_number) ? '#58a6ff' : '#8b949e', display:'flex', alignItems:'center', gap:5}}>
+                                    <div style={{width:8, height:8, borderRadius:'50%', background: s.is_active ? '#238636' : '#f85149'}}/>
+                                    {s.phone_number}
                                 </div>
                             ))}
                         </div>
                     </div>
                 </div>
 
-                {/* DIREITA: BOT FACTORY & LOGS */}
-                <div style={{display:'flex', flexDirection:'column', gap:25}}>
-                    <div style={styles.card}>
-                        <h3 style={styles.cardTitle}>🤖 Bot Factory (Auto Foto)</h3>
-                        <div style={{display:'flex', gap:10}}>
-                            <input placeholder="Nome (ex: Atendimento)" value={botFactory.baseName} onChange={e=>setBotFactory({...botFactory, baseName:e.target.value})} style={{...styles.input, marginBottom:0}} />
-                            <input type="number" placeholder="Qtd" value={botFactory.amount} onChange={e=>setBotFactory({...botFactory, amount:e.target.value})} style={{...styles.input, width:70, marginBottom:0}} />
-                        </div>
-                        <input placeholder="URL da Foto Padrão (Opcional)" value={botFactory.defaultPhoto} onChange={e=>setBotFactory({...botFactory, defaultPhoto:e.target.value})} style={{...styles.input, marginTop:10}} />
-                        <button onClick={runBotFactory} style={{...styles.btn, marginTop:10, background:'#8957e5'}}>CRIAR BOTS</button>
-
-                        {botFactory.createdBots.length > 0 && (
-                            <div style={{marginTop:15}}>
-                                <label style={styles.label}>Bots Disponíveis para Admin:</label>
-                                <div style={{height:100, overflowY:'auto', background:'#010409', borderRadius:8, padding:5, fontSize:12, color:'#58a6ff'}}>
-                                    {botFactory.createdBots.map(b => <div key={b.token}>{b.username}</div>)}
+                {/* ÁREA DE CONFIGURAÇÃO E RESULTADOS */}
+                <div style={{display:'flex', flexDirection:'column', gap:20, overflowY:'auto'}}>
+                    
+                    {factoryTab === 'groups' && (
+                        <div style={styles.card}>
+                            <h3 style={styles.cardHeader}>Configuração da Fábrica de Grupos</h3>
+                            <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:15}}>
+                                <div>
+                                    <label style={styles.label}>Nome Base dos Grupos</label>
+                                    <input value={groupConfig.baseName} onChange={e=>setGroupConfig({...groupConfig, baseName:e.target.value})} style={styles.input} />
+                                </div>
+                                <div>
+                                    <label style={styles.label}>Quantidade a Criar</label>
+                                    <input type="number" value={groupConfig.amountToCreate} onChange={e=>setGroupConfig({...groupConfig, amountToCreate:e.target.value})} style={styles.input} />
                                 </div>
                             </div>
-                        )}
-                    </div>
 
-                    <div style={{...styles.card, flex:1}}>
-                        <h4 style={{marginTop:0}}>Logs</h4>
-                        <div style={styles.logBox}>
-                            {logs.map((l, i) => <div key={i} style={{fontSize:12, color: l.includes('Erro') ? '#f85149' : '#8b949e'}}>{l}</div>)}
-                        </div>
-                    </div>
-                </div>
-            </div>
-        )}
-
-        {/* DASHBOARD */}
-        {activeTab === 'dashboard' && (
-            <div style={styles.dashboardGrid}>
-                {/* ... Dashboard simplificado ... */}
-                 <div>
-                    <div style={{ display: 'flex', gap: '15px', marginBottom:'20px' }}>
-                        <StatBox label="PENDENTES" val={stats.pending} color="#d29922" />
-                        <StatBox label="ENVIADOS" val={stats.sent} color="#238636" />
-                        <StatBox label="ONLINE" val={sessions.filter(s => s.is_active).length} color="#1f6feb" />
-                    </div>
-                    <div style={styles.card}>
-                        <h3>Mensagem Rápida</h3>
-                        <p style={{fontSize:12, color:'#8b949e'}}>Use a aba FACTORY para disparos otimizados.</p>
-                        <textarea value={config.msg} onChange={e=>setConfig({...config, msg:e.target.value})} style={{...styles.input, height:100}} placeholder="Mensagem..."/>
-                    </div>
-                </div>
-                <div style={styles.card}>
-                    <h4>Contas</h4>
-                    <button onClick={() => setSelectedPhones(new Set(sessions.filter(s => s.is_active).map(s => s.phone_number)))} style={styles.linkBtn}>Selecionar Online</button>
-                    <div style={{ flex: 1, overflowY: 'auto' }}>
-                        {sessions.map(s => (
-                            <div key={s.id} onClick={() => {
-                                const newS = new Set(selectedPhones);
-                                newS.has(s.phone_number) ? newS.delete(s.phone_number) : newS.add(s.phone_number);
-                                setSelectedPhones(newS);
-                            }} style={{...styles.accountRow, background: selectedPhones.has(s.phone_number) ? '#1f6feb22' : 'transparent'}}>
-                                <div style={{width:'8px', height:'8px', borderRadius:'50%', background: s.is_active ? '#238636' : '#f85149'}}></div>
-                                <span>{s.phone_number}</span>
+                            <label style={styles.label}>Disparo Inicial (Assim que o grupo for criado)</label>
+                            <div style={{display:'flex', gap:10}}>
+                                <select value={groupConfig.mediaType} onChange={e=>setGroupConfig({...groupConfig, mediaType:e.target.value})} style={{...styles.select, width:100}}>
+                                    <option value="text">Texto</option>
+                                    <option value="image">Imagem</option>
+                                    <option value="video">Vídeo</option>
+                                </select>
+                                <input placeholder="URL da Mídia (Opcional)" value={groupConfig.mediaUrl} onChange={e=>setGroupConfig({...groupConfig, mediaUrl:e.target.value})} style={{...styles.input, marginBottom:0}} />
                             </div>
-                        ))}
+                            <textarea placeholder="Texto da Oferta..." value={groupConfig.initialMessage} onChange={e=>setGroupConfig({...groupConfig, initialMessage:e.target.value})} style={{...styles.input, height:80, marginTop:10}} />
+
+                            {!isProcessing ? (
+                                <button onClick={runGroupFactory} style={styles.btn}>🚀 INICIAR PRODUÇÃO DE GRUPOS</button>
+                            ) : (
+                                <button onClick={() => stopProcessRef.current = true} style={{...styles.btn, background:'#f85149'}}>🛑 PARAR PRODUÇÃO</button>
+                            )}
+
+                            {/* TABELA DE RESULTADOS */}
+                            <div style={{marginTop:30}}>
+                                <h4>Grupos Criados Nesta Sessão</h4>
+                                <div style={{background:'#010409', borderRadius:8, overflow:'hidden'}}>
+                                    <div style={{display:'grid', gridTemplateColumns:'2fr 3fr 1fr 1fr', padding:10, background:'#21262d', fontSize:12, fontWeight:'bold'}}>
+                                        <div>NOME</div>
+                                        <div>LINK</div>
+                                        <div>MEMBROS</div>
+                                        <div>STATUS</div>
+                                    </div>
+                                    {createdGroups.map((g, i) => (
+                                        <div key={i} style={{display:'grid', gridTemplateColumns:'2fr 3fr 1fr 1fr', padding:10, borderBottom:'1px solid #30363d', fontSize:13}}>
+                                            <div>{g.name}</div>
+                                            <div><a href={g.link} target="_blank" style={{color:'#58a6ff'}}>{g.link}</a></div>
+                                            <div>{g.members}</div>
+                                            <div style={{color:'#238636'}}>{g.status}</div>
+                                        </div>
+                                    ))}
+                                    {createdGroups.length === 0 && <div style={{padding:20, textAlign:'center', color:'#8b949e', fontSize:13}}>Nenhum grupo criado ainda.</div>}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {factoryTab === 'bots' && (
+                        <div style={styles.card}>
+                            <h3 style={styles.cardHeader}>Fábrica de Bots (@BotFather)</h3>
+                            <div style={{display:'flex', gap:10}}>
+                                <div style={{flex:1}}>
+                                    <label style={styles.label}>Nome do Bot</label>
+                                    <input placeholder="Ex: Atendimento VIP" value={botConfig.baseName} onChange={e=>setBotConfig({...botConfig, baseName:e.target.value})} style={styles.input} />
+                                </div>
+                                <div style={{width:100}}>
+                                    <label style={styles.label}>Quantidade</label>
+                                    <input type="number" value={botConfig.amount} onChange={e=>setBotConfig({...botConfig, amount:e.target.value})} style={styles.input} />
+                                </div>
+                            </div>
+                            <label style={styles.label}>Foto de Perfil Padrão (URL)</label>
+                            <input placeholder="https://..." value={botConfig.setPhoto} onChange={e=>setBotConfig({...botConfig, setPhoto:e.target.value})} style={styles.input} />
+                            
+                            <button onClick={runBotFactory} style={{...styles.btn, background:'#8957e5'}}>🤖 GERAR BOTS</button>
+
+                            <div style={{marginTop:20}}>
+                                <h4>Tokens Gerados</h4>
+                                <textarea readOnly value={createdBots.map(b => `${b.token} | @${b.username}`).join('\n')} style={{width:'100%', height:200, background:'#010409', border:'1px solid #30363d', color:'#58a6ff', padding:10, fontFamily:'monospace'}} />
+                            </div>
+                        </div>
+                    )}
+
+                    {/* LOGS GERAIS */}
+                    <div style={{background:'#010409', padding:15, borderRadius:10, border:'1px solid #30363d', height:150, overflowY:'auto', fontFamily:'monospace', fontSize:12}}>
+                        {logs.map((l, i) => <div key={i} style={{color: l.includes('Erro')?'#f85149':'#8b949e'}}>{l}</div>)}
                     </div>
                 </div>
             </div>
         )}
 
-        {/* INBOX */}
+        {/* --- ABA DASHBOARD (SIMPLIFICADA) --- */}
+        {activeTab === 'dashboard' && (
+            <div style={{padding:25, display:'grid', gridTemplateColumns:'1fr 1fr', gap:25}}>
+                <StatBox label="LEADS TOTAIS" val={stats.total} color="#8957e5" />
+                <StatBox label="GRUPOS CRIADOS" val={createdGroups.length} color="#238636" />
+                <StatBox label="BOTS CRIADOS" val={createdBots.length} color="#d29922" />
+            </div>
+        )}
+
+        {/* --- ABA INBOX --- */}
         {activeTab === 'inbox' && (
              <div style={styles.chatContainer}>
-                <div style={styles.chatSidebar}>
-                    <button onClick={() => loadInbox()} style={{...styles.btn, margin:10, width:'auto', fontSize:12}}>{isLoadingReplies ? '...' : 'Atualizar'}</button>
-                    <div style={{flex:1, overflowY:'auto'}}>
-                        {replies.map(r => (
-                            <div key={r.chatId} onClick={() => openChat(r)} style={{padding:15, borderBottom:'1px solid #21262d', cursor:'pointer', background: selectedChat?.chatId===r.chatId ? '#1f6feb15':'transparent'}}>
-                                <b>{r.name}</b><br/><span style={{fontSize:12, color:'#8b949e'}}>{r.lastMessage}</span>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-                <div style={styles.chatArea}>
-                    {selectedChat ? (
-                        <>
-                            <div style={styles.chatHeader}><b>{selectedChat.name}</b></div>
-                            <div ref={chatListRef} style={styles.messagesList}>
-                                {chatHistory.map((m,i) => (
-                                    <div key={i} style={{alignSelf: m.isOut ? 'flex-end' : 'flex-start', background: m.isOut ? '#005c4b' : '#202c33', padding:10, borderRadius:8, marginBottom:10, maxWidth:'70%'}}>
-                                        {m.mediaType === 'video' && <video controls src={`data:video/mp4;base64,${m.media}`} style={{maxWidth:'100%'}}/>}
-                                        {m.mediaType === 'image' && <img src={`data:image/jpeg;base64,${m.media}`} style={{maxWidth:'100%'}}/>}
-                                        <div>{m.text}</div>
-                                        {!m.isOut && <button onClick={()=>coletarOferta(m)} style={styles.cloneBtn}>COPIAR</button>}
-                                    </div>
-                                ))}
-                            </div>
-                        </>
-                    ) : <div style={{flex:1, display:'flex', alignItems:'center', justifyContent:'center'}}>Selecione uma conversa</div>}
-                </div>
-             </div>
-        )}
-
-        {/* SPY */}
-        {activeTab === 'spy' && (
-             <div style={{padding:20}}>
-                 <div style={styles.card}>
-                     <h3>Grupos Escaneados</h3>
-                     <div style={styles.listArea}>
-                         {allGroups.map((g,i)=><div key={i} style={styles.listItem}>{g.title} ({g.participantsCount})</div>)}
+                 <div style={styles.chatSidebar}>
+                     <div style={{flex:1, overflowY:'auto'}}>
+                         {replies.map(r => (
+                             <div key={r.chatId} onClick={()=>openChat(r)} style={{padding:15, borderBottom:'1px solid #21262d', background: selectedChat?.chatId===r.chatId?'#1f6feb22':'transparent'}}>
+                                 <b>{r.name}</b><br/>{r.lastMessage}
+                             </div>
+                         ))}
                      </div>
+                 </div>
+                 <div style={styles.chatArea}>
+                     {selectedChat ? (
+                         <div style={{padding:20}}>
+                             <h3>{selectedChat.name}</h3>
+                             {/* Histórico renderizado aqui */}
+                         </div>
+                     ) : <div style={{padding:50, textAlign:'center'}}>Selecione</div>}
                  </div>
              </div>
         )}
-
     </div>
   );
 }
@@ -504,37 +426,34 @@ export default function AdminPanel() {
 // ESTILOS
 // ============================================================================
 const styles = {
-    mainContainer: { background: '#0d1117', height: '100vh', display: 'flex', flexDirection: 'column', color: '#c9d1d9', fontFamily: 'sans-serif', overflow: 'hidden' },
+    mainContainer: { background: '#0d1117', height: '100vh', display: 'flex', flexDirection: 'column', color: '#c9d1d9', fontFamily: 'sans-serif' },
     header: { padding: '15px 25px', background: '#161b22', borderBottom: '1px solid #30363d', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
-    versionBadge: { fontSize: '10px', background: '#238636', padding: '3px 7px', borderRadius: '4px', color: 'white', fontWeight: 'bold' },
+    badge: { fontSize: 10, background: '#238636', padding: '3px 7px', borderRadius: 4, color: 'white', fontWeight: 'bold' },
     loginContainer: { height: '100vh', background: '#0d1117', display: 'flex', justifyContent: 'center', alignItems: 'center' },
-    loginBox: { background: '#161b22', padding: '40px', borderRadius: '12px', border: '1px solid #30363d', width: '350px' },
-    dashboardGrid: { padding: '25px', display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '25px', flex: 1, overflowY: 'auto' },
-    card: { background: '#161b22', padding: '20px', borderRadius: '10px', border: '1px solid #30363d', display: 'flex', flexDirection: 'column' },
-    cardTitle: { borderBottom:'1px solid #30363d', paddingBottom:10, marginTop:0 },
-    logBox: { flex: 1, overflowY: 'auto', background: '#010409', padding: '15px', borderRadius: '10px', border: '1px solid #30363d', fontFamily: 'monospace', marginTop: '10px' },
-    accountRow: { padding: '12px', borderBottom: '1px solid #21262d', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '12px' },
-    chatContainer: { flex: 1, display: 'grid', gridTemplateColumns: '320px 1fr', overflow: 'hidden', background: '#0b141a' },
-    chatSidebar: { borderRight: '1px solid #30363d', background: '#111b21', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
-    chatArea: { display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' },
-    chatHeader: { padding: '15px 25px', background: '#202c33', borderBottom: '1px solid #30363d' },
-    messagesList: { flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', padding: '25px', minHeight: 0 },
-    input: { width: '100%', padding: '12px', background: '#010409', border: '1px solid #30363d', color: 'white', borderRadius: '8px', marginBottom: '12px', outline: 'none', boxSizing: 'border-box', fontSize: '14px' },
-    select: { background: '#010409', color: 'white', border: '1px solid #30363d', padding: '12px', borderRadius: '8px', cursor: 'pointer' },
-    btn: { width: '100%', padding: '14px', background: '#238636', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' },
-    navBtn: { color: 'white', padding: '8px 18px', borderRadius: '6px', cursor: 'pointer', border: '1px solid transparent', fontSize: '13px', fontWeight: 'bold' },
-    logoutBtn: { background: '#f85149', border: 'none', color: 'white', padding: '8px 15px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' },
-    linkBtn: { background: 'none', border: 'none', color: '#58a6ff', cursor: 'pointer', fontSize: '12px', textDecoration: 'underline' },
-    cloneBtn: { background: 'rgba(31, 111, 235, 0.2)', color: '#58a6ff', border: '1px solid #1f6feb', fontSize: '10px', padding: '3px 10px', borderRadius: '5px', cursor: 'pointer', fontWeight: 'bold', marginTop: 5 },
-    listArea: { height: '350px', overflowY: 'auto', background: '#0d1117', padding: '15px', borderRadius: '10px' },
-    listItem: { padding: '10px', borderBottom: '1px solid #21262d', fontSize: '14px' },
-    label: { fontSize:12, color:'#8b949e', display:'block', marginBottom:5, fontWeight:'bold' },
-    checkboxLabel: { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#c9d1d9', cursor: 'pointer' }
+    loginBox: { background: '#161b22', padding: 40, borderRadius: 12, border: '1px solid #30363d', width: 350 },
+    card: { background: '#161b22', padding: 25, borderRadius: 10, border: '1px solid #30363d' },
+    cardHeader: { marginTop: 0, paddingBottom: 15, borderBottom: '1px solid #30363d' },
+    input: { width: '100%', padding: 12, background: '#010409', border: '1px solid #30363d', color: 'white', borderRadius: 8, marginBottom: 15, boxSizing: 'border-box' },
+    select: { background: '#010409', color: 'white', border: '1px solid #30363d', padding: 12, borderRadius: 8 },
+    btn: { width: '100%', padding: 14, background: '#238636', color: 'white', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 'bold' },
+    logoutBtn: { background: '#f85149', border: 'none', color: 'white', padding: '8px 15px', borderRadius: 6, cursor: 'pointer', fontWeight: 'bold' },
+    label: { display: 'block', fontSize: 12, color: '#8b949e', marginBottom: 5, fontWeight: 'bold' },
+    chatContainer: { flex: 1, display: 'grid', gridTemplateColumns: '300px 1fr' },
+    chatSidebar: { borderRight: '1px solid #30363d', background: '#111b21' },
+    chatArea: { background: '#0b141a' }
 };
 
+const navBtn = (active) => ({
+    background: active ? '#1f6feb' : 'transparent', border: '1px solid #30363d', color: 'white', padding: '8px 15px', borderRadius: 6, cursor: 'pointer', fontWeight: 'bold'
+});
+
+const subTabBtn = (active) => ({
+    width: '100%', padding: 12, background: active ? '#1f6feb22' : 'transparent', color: active ? '#58a6ff' : '#8b949e', border: active ? '1px solid #1f6feb' : '1px solid transparent', borderRadius: 6, cursor: 'pointer', textAlign: 'left', fontWeight: 'bold'
+});
+
 const StatBox = ({ label, val, color }) => (
-    <div style={{ flex: 1, background: '#161b22', padding: '20px', borderRadius: '10px', borderLeft: `5px solid ${color}` }}>
-        <h2 style={{ margin: 0, color: 'white', fontSize: '26px' }}>{val}</h2>
-        <small style={{ color: '#8b949e', fontSize: '11px', fontWeight: 'bold' }}>{label}</small>
+    <div style={{ background: '#161b22', padding: 20, borderRadius: 10, borderLeft: `5px solid ${color}` }}>
+        <h2 style={{ margin: 0, fontSize: 28, color: 'white' }}>{val}</h2>
+        <small style={{ color: '#8b949e', fontWeight: 'bold' }}>{label}</small>
     </div>
 );
