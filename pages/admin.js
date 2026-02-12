@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef, useLayoutEffect } from 'react';
 
 // ============================================================================
-// HOTTRACK V16 - FINAL STABLE
-// Correções: Fetch POST no Inbox, Scroll Chat, Seleção Automática
+// HOTTRACK V17 - SMART ENGINE & MEDIA SPY
+// - Renderização de Vídeos no Chat
+// - Prioridade Inteligente: @Username > UserID
+// - Botão de Clonagem de Ofertas
 // ============================================================================
 
 export default function AdminPanel() {
@@ -24,7 +26,8 @@ export default function AdminPanel() {
 
   // --- DISPARO & MODELOS ---
   const [isProcessing, setIsProcessing] = useState(false);
-  const [config, setConfig] = useState({ msg: '{Olá|Oi}, tudo bem?', imgUrl: '', useRandom: true });
+  // Adicionado suporte para clonar media (base64) temporariamente na memória
+  const [config, setConfig] = useState({ msg: '', imgUrl: '', useRandom: true, clonedMedia: null, clonedMediaType: null });
   const [templates, setTemplates] = useState([]); 
   const [templateName, setTemplateName] = useState('');
   const stopProcessRef = useRef(false);
@@ -37,7 +40,6 @@ export default function AdminPanel() {
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [chatOffset, setChatOffset] = useState(0);
   
-  // Refs para controle de scroll
   const chatListRef = useRef(null); 
   const [shouldScrollToBottom, setShouldScrollToBottom] = useState(true);
 
@@ -49,7 +51,7 @@ export default function AdminPanel() {
   const [toolsInput, setToolsInput] = useState({ name: '', photo: '', storyUrl: '', storyCaption: '' });
 
   // ==========================================================================
-  // INICIALIZAÇÃO E POLLING
+  // INICIALIZAÇÃO
   // ==========================================================================
 
   useEffect(() => {
@@ -58,7 +60,6 @@ export default function AdminPanel() {
           setAuthToken(token); 
           setIsAuthenticated(true); 
       }
-      
       const savedGroups = localStorage.getItem('godModeGroups');
       if (savedGroups) setAllGroups(JSON.parse(savedGroups));
 
@@ -66,36 +67,31 @@ export default function AdminPanel() {
       if (savedTemplates) setTemplates(JSON.parse(savedTemplates));
   }, []);
 
-  // Polling de Dados (Atualiza status e estatísticas)
+  // Polling de Dados
   useEffect(() => {
       if (isAuthenticated) {
-          fetchData(); // Carga inicial
+          fetchData(); 
           const intervalId = setInterval(() => {
-              // Atualiza apenas sessões e stats a cada 4s
               const t = Date.now();
-              apiCall(`/api/list-sessions?t=${t}`).then(r => r?.ok && r.json().then(d => {
-                  setSessions(d.sessions || []);
-              }));
+              apiCall(`/api/list-sessions?t=${t}`).then(r => r?.ok && r.json().then(d => setSessions(d.sessions || [])));
               apiCall(`/api/stats?t=${t}`).then(r => r?.ok && r.json().then(d => setStats(d)));
           }, 4000);
-
           return () => clearInterval(intervalId);
       }
   }, [isAuthenticated]);
 
-  // Auto-seleção de contas ao entrar no Inbox se vazio
+  // Auto-seleção no Inbox
   useEffect(() => {
       if (activeTab === 'inbox' && selectedPhones.size === 0 && sessions.length > 0) {
           const online = sessions.filter(s => s.is_active).map(s => s.phone_number);
           if (online.length > 0) {
               setSelectedPhones(new Set(online));
-              // Pequeno delay para garantir que o estado atualizou antes de carregar
               setTimeout(() => loadInbox(new Set(online)), 100);
           }
       }
   }, [activeTab]);
 
-  // Scroll Inteligente do Chat
+  // Scroll Chat
   useLayoutEffect(() => {
       if (chatListRef.current && shouldScrollToBottom) {
           chatListRef.current.scrollTop = chatListRef.current.scrollHeight;
@@ -103,7 +99,7 @@ export default function AdminPanel() {
   }, [chatHistory, shouldScrollToBottom, selectedChat]);
 
   // ==========================================================================
-  // FUNÇÕES API (HELPER)
+  // FUNÇÕES AUXILIARES
   // ==========================================================================
 
   const apiCall = async (endpoint, body) => {
@@ -116,15 +112,9 @@ export default function AdminPanel() {
               },
               body: body ? JSON.stringify(body) : null
           });
-          
-          if (response.status === 401) { 
-              setIsAuthenticated(false); 
-              return null; 
-          }
+          if (response.status === 401) { setIsAuthenticated(false); return null; }
           return response;
-      } catch (error) { 
-          return { ok: false }; 
-      }
+      } catch (error) { return { ok: false }; }
   };
 
   const addLog = (message) => {
@@ -141,7 +131,6 @@ export default function AdminPanel() {
       }
       const stRes = await apiCall(`/api/stats?t=${t}`);
       if (stRes?.ok) setStats(await stRes.json());
-      
       const hRes = await apiCall('/api/get-harvested');
       if (hRes?.ok) {
           const data = await hRes.json();
@@ -150,39 +139,37 @@ export default function AdminPanel() {
   };
 
   // ==========================================================================
-  // GESTÃO DE MODELOS
+  // CLONAGEM DE OFERTAS (SPY)
   // ==========================================================================
-  
-  const saveTemplate = () => {
-      if (!templateName) return alert('Nome do modelo obrigatório');
-      const newTemplates = [...templates, { id: Date.now(), name: templateName, msg: config.msg, img: config.imgUrl }];
-      setTemplates(newTemplates);
-      localStorage.setItem('ht_templates', JSON.stringify(newTemplates));
-      setTemplateName('');
-      alert('Salvo!');
-  };
 
-  const loadTemplate = (id) => {
-      const template = templates.find(x => x.id == id);
-      if (template) setConfig({ ...config, msg: template.msg, imgUrl: template.img });
-  };
+  const cloneOffer = (msg) => {
+      if (!msg.text && !msg.media) return alert('Mensagem vazia!');
+      
+      const confirmClone = confirm('♻️ Deseja clonar esta oferta para o Dashboard de envio?');
+      if (!confirmClone) return;
 
-  const deleteTemplate = (id) => {
-      if(!confirm('Excluir?')) return;
-      const newTemplates = templates.filter(x => x.id !== id);
-      setTemplates(newTemplates);
-      localStorage.setItem('ht_templates', JSON.stringify(newTemplates));
+      // Configura o painel de envio com os dados da mensagem
+      setConfig(prev => ({
+          ...prev,
+          msg: msg.text || '',
+          // Se tiver mídia, teríamos que tratar upload, por enquanto focamos no texto
+          // Futuramente: implementar upload de base64 para URL
+          imgUrl: '' 
+      }));
+
+      setActiveTab('dashboard');
+      addLog('♻️ Oferta clonada para a área de envio!');
   };
 
   // ==========================================================================
-  // ENGINE V16 (SISTEMA DE DISPARO)
+  // ENGINE V17 - SMART TARGETING
   // ==========================================================================
   
   const startEngine = async () => {
       if (selectedPhones.size === 0) return alert('Selecione contas na lista ao lado!');
       setIsProcessing(true);
       stopProcessRef.current = false;
-      addLog('🚀 ENGINE INICIADA');
+      addLog('🚀 ENGINE V17 (SMART) INICIADA');
 
       let senders = Array.from(selectedPhones);
       let cooldowns = {}; 
@@ -192,12 +179,12 @@ export default function AdminPanel() {
           const activeSenders = senders.filter(p => !cooldowns[p] || now > cooldowns[p]);
 
           if (activeSenders.length === 0) {
-              addLog('⏳ Flood Wait em todas as contas. Aguardando 10s...');
+              addLog('⏳ Todas as contas em pausa. Aguardando 10s...');
               await new Promise(r => setTimeout(r, 10000));
               continue;
           }
 
-          // Busca leads (sem cache)
+          // Busca leads
           const leadsRes = await apiCall(`/api/get-campaign-leads?limit=15&random=${config.useRandom}&t=${Date.now()}`);
           const leadsData = await leadsRes?.json();
           const leads = leadsData?.leads || [];
@@ -207,7 +194,6 @@ export default function AdminPanel() {
               break; 
           }
 
-          // Disparo Paralelo
           const promises = leads.map(async (lead) => {
                if (stopProcessRef.current) return;
                
@@ -215,10 +201,20 @@ export default function AdminPanel() {
                if (currentSenders.length === 0) return;
                const sender = currentSenders[Math.floor(Math.random() * currentSenders.length)];
 
+               // LÓGICA INTELIGENTE DE ALVO: Prioriza Username, falha para ID
+               let target = lead.username;
+               if (!target || target === 'null') {
+                   target = lead.user_id; // Só usa ID se não tiver user
+               }
+               // Garante que username tenha @ se não for numérico
+               if (isNaN(target) && !target.startsWith('@')) {
+                   target = '@' + target;
+               }
+
                try {
                   const res = await apiCall('/api/dispatch', {
                       senderPhone: sender, 
-                      target: lead.user_id, 
+                      target: target, // Envia o alvo otimizado
                       username: lead.username,
                       message: config.msg, 
                       imageUrl: config.imgUrl, 
@@ -231,10 +227,10 @@ export default function AdminPanel() {
                       cooldowns[sender] = Date.now() + (wait * 1000);
                       addLog(`⛔ Flood ${sender}. Pausa ${wait}s.`);
                   } else if (data.success) {
-                      addLog(`✅ Enviado: ${sender} -> ${lead.username || lead.user_id}`);
+                      addLog(`✅ Enviado: ${sender} -> ${target}`);
                       setStats(prev => ({ ...prev, sent: prev.sent + 1, pending: prev.pending - 1 }));
                   } else {
-                      addLog(`❌ Erro ${sender}: ${data.error}`);
+                      addLog(`❌ Erro ${sender} p/ ${target}: ${data.error}`);
                   }
                } catch (e) { }
           });
@@ -243,22 +239,20 @@ export default function AdminPanel() {
           await new Promise(r => setTimeout(r, 1500));
       }
       setIsProcessing(false);
-      addLog('🏁 Engine Parada.');
+      addLog('🏁 Disparo Finalizado.');
       fetchData();
   };
 
   // ==========================================================================
-  // INBOX (CHAT) - CORRIGIDO
+  // INBOX & CHAT
   // ==========================================================================
   
   const loadInbox = async (forcePhones = null) => {
       const phonesToUse = forcePhones ? forcePhones : selectedPhones;
       
       if (phonesToUse.size === 0) {
-          // Tenta pegar sessões ativas se nada selecionado
           const active = sessions.filter(s => s.is_active).map(s => s.phone_number);
           if (active.length > 0) {
-             alert(`Nenhuma conta selecionada. Carregando ${active.length} contas online.`);
              phonesToUse.add(...active);
              setSelectedPhones(new Set(active));
           } else {
@@ -272,7 +266,6 @@ export default function AdminPanel() {
       const phones = Array.from(phonesToUse);
       let allReplies = [];
 
-      // POST request para garantir compatibilidade
       const CHUNK_SIZE = 5;
       for (let i = 0; i < phones.length; i += CHUNK_SIZE) {
           const batch = phones.slice(i, i + CHUNK_SIZE);
@@ -286,7 +279,6 @@ export default function AdminPanel() {
           });
       }
       
-      // Remove duplicados e ordena
       const uniqueReplies = Array.from(new Map(allReplies.map(item => [item.chatId, item])).values());
       setReplies(uniqueReplies.sort((a, b) => b.timestamp - a.timestamp));
       setIsLoadingReplies(false);
@@ -297,9 +289,9 @@ export default function AdminPanel() {
           setSelectedChat(reply);
           setChatHistory([]);
           setChatOffset(0);
-          setShouldScrollToBottom(true); // Rola para baixo ao abrir
+          setShouldScrollToBottom(true); 
       } else {
-          setShouldScrollToBottom(false); // Mantém posição ao carregar antigas
+          setShouldScrollToBottom(false); 
       }
 
       setIsChatLoading(true);
@@ -315,7 +307,6 @@ export default function AdminPanel() {
           if (response.ok) {
               const data = await response.json();
               if (data.history) {
-                  // Inverte para exibir cronologicamente (antigas no topo, novas embaixo)
                   const sortedHistory = data.history.reverse(); 
                   setChatHistory(prev => offset === 0 ? sortedHistory : [...sortedHistory, ...prev]);
                   setChatOffset(offset + 20);
@@ -326,7 +317,7 @@ export default function AdminPanel() {
   };
 
   // ==========================================================================
-  // SPY & TOOLS
+  // SPY & TOOLS (Group Scanner)
   // ==========================================================================
 
   const scanGroups = async () => {
@@ -408,7 +399,7 @@ export default function AdminPanel() {
   if (!isAuthenticated) return (
       <div style={styles.loginContainer}>
           <form onSubmit={handleLogin} style={styles.loginBox}>
-              <h2 style={{ textAlign: 'center', margin: '0 0 20px 0', color: 'white' }}>HOTTRACK V16</h2>
+              <h2 style={{ textAlign: 'center', margin: '0 0 20px 0', color: 'white' }}>HOTTRACK V17</h2>
               <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
                   <button type="button" onClick={() => setLoginMode('user')} style={{...styles.toggleBtn, background: loginMode === 'user' ? '#238636' : '#21262d'}}>User</button>
                   <button type="button" onClick={() => setLoginMode('admin')} style={{...styles.toggleBtn, background: loginMode === 'admin' ? '#8957e5' : '#21262d'}}>Admin</button>
@@ -432,7 +423,7 @@ export default function AdminPanel() {
         <div style={styles.header}>
             <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
                 <h2 style={{ margin: 0, color: 'white' }}>HOTTRACK</h2>
-                <span style={styles.versionBadge}>V16 PRO</span>
+                <span style={styles.versionBadge}>V17 SMART</span>
             </div>
             <div style={{ display: 'flex', gap: '10px' }}>
                 {['dashboard', 'inbox', 'spy', 'tools'].map(tab => (
@@ -452,17 +443,13 @@ export default function AdminPanel() {
                 <div style={{display:'flex', flexDirection:'column', gap:'20px'}}>
                     <div style={{ display: 'flex', gap: '15px' }}>
                         <StatBox label="PENDENTES" val={stats.pending} color="#d29922" />
-                        <StatBox label="ENVIADOS HOJE" val={stats.sent} color="#238636" />
+                        <StatBox label="ENVIADOS" val={stats.sent} color="#238636" />
                         <StatBox label="ONLINE" val={sessions.filter(s => s.is_active).length} color="#1f6feb" />
                     </div>
                     
                     <div style={styles.card}>
                         <div style={styles.cardHeader}>
                             <h3>Configuração de Envio</h3>
-                            <select onChange={(e) => loadTemplate(e.target.value)} style={styles.select}>
-                                <option value="">📂 Carregar Modelo...</option>
-                                {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                            </select>
                         </div>
                         <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
                             <input placeholder="URL Imagem" value={config.imgUrl} onChange={e => setConfig({ ...config, imgUrl: e.target.value })} style={{ flex: 1, ...styles.input, marginBottom: 0 }} />
@@ -470,14 +457,8 @@ export default function AdminPanel() {
                                 <input type="checkbox" checked={config.useRandom} onChange={e => setConfig({ ...config, useRandom: e.target.checked })} /> Aleatório
                             </label>
                         </div>
-                        <textarea placeholder="Mensagem..." value={config.msg} onChange={e => setConfig({ ...config, msg: e.target.value })} style={{ ...styles.input, height: '80px', fontFamily:'monospace' }} />
+                        <textarea placeholder="Mensagem..." value={config.msg} onChange={e => setConfig({ ...config, msg: e.target.value })} style={{ ...styles.input, height: '100px', fontFamily:'monospace' }} />
                         
-                        <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
-                            <input placeholder="Nome Modelo" value={templateName} onChange={e => setTemplateName(e.target.value)} style={{ flex: 1, ...styles.input, marginBottom: 0 }} />
-                            <button onClick={saveTemplate} style={{...styles.btn, background:'#1f6feb', width:'auto'}}>Salvar</button>
-                            {templateName && <button onClick={() => deleteTemplate(Date.now())} style={{...styles.btn, background:'#f85149', width:'auto'}}>X</button>}
-                        </div>
-
                         <div style={{ display: 'flex', gap: '10px' }}>
                             {!isProcessing ? 
                                 <button onClick={startEngine} style={{ ...styles.btn, background: '#238636' }}>🚀 INICIAR</button> : 
@@ -511,7 +492,7 @@ export default function AdminPanel() {
             </div>
         )}
 
-        {/* INBOX (CHAT) */}
+        {/* INBOX (CHAT V17) */}
         {activeTab === 'inbox' && (
             <div style={styles.chatContainer}>
                 <div style={styles.chatSidebar}>
@@ -545,7 +526,6 @@ export default function AdminPanel() {
                                 </div>
                             </div>
                             
-                            {/* AREA DE MENSAGENS COM REF DE SCROLL */}
                             <div ref={chatListRef} style={styles.messagesList}>
                                 <div style={{textAlign: 'center', margin: '10px 0'}}>
                                     <button onClick={() => openChat(selectedChat, chatOffset)} style={styles.loadMoreBtn}>
@@ -556,32 +536,56 @@ export default function AdminPanel() {
                                 {chatHistory.map((m, i) => (
                                     <div key={i} style={{
                                         alignSelf: m.isOut ? 'flex-end' : 'flex-start',
-                                        maxWidth: '70%',
-                                        marginBottom: '8px',
+                                        maxWidth: '75%',
+                                        marginBottom: '10px',
                                         background: m.isOut ? '#005c4b' : '#202c33',
-                                        padding: '8px 12px',
+                                        padding: '10px',
                                         borderRadius: '8px',
                                         color: 'white',
                                         fontSize: '14px',
-                                        position: 'relative'
+                                        position: 'relative',
+                                        boxShadow: '0 1px 2px rgba(0,0,0,0.3)'
                                     }}>
-                                        {m.mediaType === 'image' && <img src={`data:image/jpeg;base64,${m.media}`} style={{maxWidth:'100%', borderRadius:'5px'}} />}
-                                        <div style={{whiteSpace:'pre-wrap'}}>{m.text}</div>
-                                        <div style={{fontSize:'10px', textAlign:'right', opacity:0.6, marginTop:'2px'}}>
-                                            {new Date(m.date * 1000).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
+                                        {/* RENDERIZAÇÃO DE MÍDIA AVANÇADA */}
+                                        {m.mediaType === 'image' && <img src={`data:image/jpeg;base64,${m.media}`} style={{maxWidth:'100%', borderRadius:'5px', marginBottom:'5px'}} />}
+                                        
+                                        {m.mediaType === 'video' && (
+                                            <video controls style={{maxWidth:'100%', borderRadius:'5px', marginBottom:'5px'}}>
+                                                <source src={`data:video/mp4;base64,${m.media}`} type="video/mp4" />
+                                            </video>
+                                        )}
+                                        
+                                        {(m.mediaType === 'audio' || m.mediaType === 'voice') && (
+                                            <audio controls style={{maxWidth:'220px', marginBottom:'5px'}}>
+                                                <source src={`data:audio/ogg;base64,${m.media}`} type="audio/ogg" />
+                                                <source src={`data:audio/mp3;base64,${m.media}`} type="audio/mpeg" />
+                                            </audio>
+                                        )}
+
+                                        <div style={{whiteSpace:'pre-wrap', lineHeight: '1.4'}}>{m.text}</div>
+                                        
+                                        <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-end', marginTop:'5px'}}>
+                                            {!m.isOut ? (
+                                                <button onClick={() => cloneOffer(m)} style={styles.cloneBtn}>
+                                                    ♻️ REUTILIZAR
+                                                </button>
+                                            ) : <span></span>}
+                                            <div style={{fontSize:'10px', opacity:0.6}}>
+                                                {new Date(m.date * 1000).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
+                                            </div>
                                         </div>
                                     </div>
                                 ))}
                             </div>
                             
                             <div style={{padding:'10px', background:'#202c33', display:'flex', gap:'10px'}}>
-                                <input placeholder="Mensagem..." style={{...styles.input, marginBottom:0, borderRadius:'20px'}} />
+                                <input placeholder="Responder..." style={{...styles.input, marginBottom:0, borderRadius:'20px'}} />
                                 <button style={{...styles.btn, width:'auto', borderRadius:'50%', padding:'10px 15px'}}>➤</button>
                             </div>
                         </>
                     ) : (
                         <div style={{flex:1, display:'flex', alignItems:'center', justifyContent:'center', color:'#8b949e'}}>
-                            Selecione uma conversa para iniciar
+                            Selecione uma conversa para monitorar
                         </div>
                     )}
                 </div>
@@ -631,21 +635,12 @@ const styles = {
     logBox: { height: '200px', overflowY: 'auto', background: '#010409', padding: '10px', borderRadius: '8px', border: '1px solid #30363d', fontFamily: 'monospace' },
     accountRow: { padding: '8px', borderBottom: '1px solid #21262d', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px' },
 
-    // Layout do Chat
     chatContainer: { flex: 1, display: 'grid', gridTemplateColumns: '300px 1fr', overflow: 'hidden', background: '#0b141a' },
     chatSidebar: { borderRight: '1px solid #30363d', background: '#111b21', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
     chatArea: { display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', backgroundImage: 'linear-gradient(#0b141a 2px, transparent 2px), linear-gradient(90deg, #0b141a 2px, transparent 2px)', backgroundSize: '20px 20px' },
     chatHeader: { padding: '10px 20px', background: '#202c33', borderBottom: '1px solid #30363d', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
     
-    // Lista de mensagens com Scroll correto
-    messagesList: { 
-        flex: 1, 
-        overflowY: 'auto', 
-        display: 'flex', 
-        flexDirection: 'column', 
-        padding: '20px',
-        minHeight: 0 
-    },
+    messagesList: { flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', padding: '20px', minHeight: 0 },
 
     input: { width: '100%', padding: '10px', background: '#010409', border: '1px solid #30363d', color: 'white', borderRadius: '6px', marginBottom: '10px', outline: 'none', boxSizing: 'border-box' },
     select: { background: '#21262d', color: 'white', border: '1px solid #30363d', padding: '5px', borderRadius: '4px' },
@@ -658,7 +653,8 @@ const styles = {
     loadMoreBtn: { background: 'transparent', border: '1px solid #30363d', color: '#58a6ff', padding: '5px 15px', borderRadius: '20px', cursor: 'pointer', fontSize: '11px' },
     listArea: { height: '250px', overflowY: 'auto', background: '#0d1117', padding: '10px', borderRadius: '6px' },
     listItem: { padding: '5px', borderBottom: '1px solid #21262d', fontSize: '13px' },
-    toggleBtn: { flex: 1, border: 'none', color: 'white', padding: '8px', cursor: 'pointer', borderRadius: '4px', fontWeight: 'bold' }
+    toggleBtn: { flex: 1, border: 'none', color: 'white', padding: '8px', cursor: 'pointer', borderRadius: '4px', fontWeight: 'bold' },
+    cloneBtn: { background: 'rgba(31, 111, 235, 0.2)', color: '#58a6ff', border: '1px solid #1f6feb', fontSize: '10px', padding: '2px 8px', borderRadius: '4px', cursor: 'pointer' }
 };
 
 const StatBox = ({ label, val, color }) => (
