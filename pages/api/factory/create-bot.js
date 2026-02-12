@@ -7,7 +7,6 @@ export default async function handler(req, res) {
   try {
     const client = await getClient(phone);
     
-    // Inicia conversa com BotFather
     await client.sendMessage('BotFather', { message: '/newbot' });
     await new Promise(r => setTimeout(r, 1000));
     
@@ -16,10 +15,11 @@ export default async function handler(req, res) {
     
     const result = await client.sendMessage('BotFather', { message: username });
     
-    // Espera resposta com Token (lógica simplificada, ideal é ler histórico)
-    // Aqui assumimos sucesso se não der erro de rede
-    
-    // Se tiver foto, atualiza
+    // Lógica simplificada: assume sucesso se não der erro.
+    // Em produção real, você deve ler a resposta do BotFather para pegar o token exato.
+    // Aqui geramos um placeholder para demonstrar no painel.
+    const tokenPlaceholder = `TOKEN_PENDENTE_VERIFICAR_NO_TELEGRAM`; 
+
     if (photoUrl) {
          await client.sendMessage('BotFather', { message: '/setuserpic' });
          await new Promise(r => setTimeout(r, 500));
@@ -28,9 +28,7 @@ export default async function handler(req, res) {
          await client.sendMessage('BotFather', { file: photoUrl });
     }
 
-    // Nota: Em produção real, você precisa ler a última mensagem do BotFather para pegar o token
-    // Como simplificação, retornamos sucesso.
-    return res.status(200).json({ success: true, token: "TOKEN_PENDENTE_DE_LEITURA" });
+    return res.status(200).json({ success: true, token: tokenPlaceholder });
 
   } catch (error) {
     return res.status(500).json({ error: error.message });
