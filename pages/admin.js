@@ -65,6 +65,7 @@ export default function AdminPanel() {
   const [selectedDialog, setSelectedDialog] = useState(null);
   const [inboxHistory, setInboxHistory] = useState([]);
   const [loadingInboxHistory, setLoadingInboxHistory] = useState(false);
+  const [loadingInbox, setLoadingInbox] = useState(false);
   // const [loadingBotFlow, setLoadingBotFlow] = useState(false); // Temporariamente desabilitado
 
   // --- ESTADOS DE GRUPOS E DISPAROS SEGMENTADOS ---
