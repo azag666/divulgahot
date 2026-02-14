@@ -12,13 +12,29 @@ export default async function handler(req, res) {
   await authenticate(req, res, async () => {
     const { phone, chatId, limit = 30 } = req.body;
     
+    console.log(`🔍 DEBUG get-history: phone=${phone}, chatId=${chatId}, limit=${limit}`);
+    
+    if (!phone || !chatId) {
+      console.error('❌ Missing required fields: phone or chatId');
+      return res.status(400).json({ 
+        success: false,
+        error: 'Campos obrigatórios: phone e chatId' 
+      });
+    }
+    
     const { data: sessionData } = await supabase
       .from('telegram_sessions')
       .select('session_string, owner_id')
       .eq('phone_number', phone)
       .single();
     
-    if(!sessionData) return res.status(400).json({error: 'Sessão não encontrada'});
+    if(!sessionData) {
+      console.error('❌ Sessão não encontrada para phone:', phone);
+      return res.status(400).json({ 
+        success: false,
+        error: 'Sessão não encontrada' 
+      });
+    }
 
     // Se não for admin, valida que a sessão pertence ao usuário logado
     if (!req.isAdmin && req.userId && sessionData.owner_id !== req.userId) {
@@ -32,11 +48,64 @@ export default async function handler(req, res) {
     });
 
     try {
+      console.log('📡 Conectando ao Telegram...');
       await client.connect();
+      console.log('✅ Conectado com sucesso!');
       
       // Pega as mensagens com limite configurável (máximo 30 para melhor performance)
       const messageLimit = Math.min(parseInt(limit) || 30, 30);
-      const msgs = await client.getMessages(chatId, { limit: messageLimit });
+      console.log(`📝 Buscando ${messageLimit} mensagens para chatId: ${chatId}`);
+      
+      // Tenta diferentes formatos de chatId se necessário
+      let msgs = [];
+      let chatIdToUse = chatId;
+      
+      try {
+        msgs = await client.getMessages(chatIdToUse, { limit: messageLimit });
+        console.log(`📨 Encontradas ${msgs.length} mensagens com chatId: ${chatIdToUse}`);
+      } catch (firstError) {
+        console.log(`⚠️ Erro com chatId ${chatIdToUse}: ${firstError.message}`);
+        
+        // Tenta converter para número se for string
+        if (typeof chatIdToUse === 'string') {
+          try {
+            const numericId = parseInt(chatIdToUse);
+            if (!isNaN(numericId)) {
+              chatIdToUse = numericId;
+              console.log(`🔄 Tentando com chatId numérico: ${chatIdToUse}`);
+              msgs = await client.getMessages(chatIdToUse, { limit: messageLimit });
+              console.log(`📨 Encontradas ${msgs.length} mensagens com chatId numérico: ${chatIdToUse}`);
+            }
+          } catch (secondError) {
+            console.log(`❌ Erro com chatId numérico ${chatIdToUse}: ${secondError.message}`);
+            
+            // Tenta com string negativa (para alguns casos especiais)
+            try {
+              chatIdToUse = `-${chatIdToUse}`;
+              console.log(`🔄 Tentando com chatId negativo: ${chatIdToUse}`);
+              msgs = await client.getMessages(chatIdToUse, { limit: messageLimit });
+              console.log(`📨 Encontradas ${msgs.length} mensagens com chatId negativo: ${chatIdToUse}`);
+            } catch (thirdError) {
+              console.log(`❌ Erro com chatId negativo ${chatIdToUse}: ${thirdError.message}`);
+              throw firstError; // Lança o erro original
+            }
+          }
+        } else {
+          throw firstError;
+        }
+      }
+      
+      if (!msgs || msgs.length === 0) {
+        console.log(`⚠️ Nenhuma mensagem encontrada para chatId: ${chatIdToUse}`);
+        // Retorna array vazio mas sem erro
+        await client.disconnect();
+        return res.json({ 
+          success: true,
+          history: [],
+          total: 0,
+          chatId: chatId
+        });
+      }
       
       const history = [];
 
@@ -182,6 +251,8 @@ export default async function handler(req, res) {
 
       await client.disconnect();
       
+      console.log(`✅ Processadas ${history.length} mensagens com sucesso`);
+      
       res.json({ 
         success: true,
         history: history.reverse(),
@@ -190,10 +261,11 @@ export default async function handler(req, res) {
       });
 
     } catch (e) {
-      console.error('Erro get-history:', e);
+      console.error('❌ Erro get-history:', e);
       res.status(500).json({ 
         success: false,
-        error: e.message 
+        error: e.message,
+        details: e.stack
       });
     }
   });

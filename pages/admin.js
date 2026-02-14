@@ -1083,7 +1083,12 @@ export default function AdminPanel() {
   };
 
   const loadInboxHistory = async (dialogId) => {
-    if (!selectedInboxPhone || !dialogId) return;
+    if (!selectedInboxPhone || !dialogId) {
+      console.error('❌ loadInboxHistory: missing selectedInboxPhone or dialogId');
+      return;
+    }
+    
+    console.log(`🔍 DEBUG loadInboxHistory: phone=${selectedInboxPhone}, dialogId=${dialogId}`);
     
     setLoadingInboxHistory(true);
     
@@ -1097,17 +1102,23 @@ export default function AdminPanel() {
         })
       });
       
+      console.log(`📡 Response status: ${res.status}`);
+      
       const data = await res.json();
+      console.log('📨 Response data:', data);
       
       if (data.success && data.history) {
         setInboxHistory(data.history);
         addLog(`📝 Carregadas ${data.history.length} mensagens do diálogo`);
+        console.log(`✅ Sucesso: ${data.history.length} mensagens carregadas`);
       } else {
-        addLog(`❌ Erro ao carregar histórico: ${data.error || 'Erro desconhecido'}`);
+        const errorMsg = data.error || 'Erro desconhecido';
+        addLog(`❌ Erro ao carregar histórico: ${errorMsg}`);
         setInboxHistory([]);
+        console.error('❌ Erro na resposta:', data);
       }
     } catch (e) {
-      console.error('Erro loadInboxHistory:', e);
+      console.error('❌ Erro loadInboxHistory:', e);
       addLog(`⛔ Erro ao carregar histórico: ${e.message}`);
       setInboxHistory([]);
     } finally {
@@ -1116,8 +1127,14 @@ export default function AdminPanel() {
   };
 
   const selectDialog = (dialog) => {
-    if (selectedDialog?.id === dialog.id) return; // Não recarrega se já selecionado
+    console.log(`🔍 DEBUG selectDialog: dialog=${JSON.stringify(dialog)}`);
     
+    if (selectedDialog?.id === dialog.id) {
+      console.log('⚠️ Dialog já selecionado, ignorando');
+      return; // Não recarrega se já selecionado
+    }
+    
+    console.log(`📝 Selecionando diálogo: ${dialog.title} (ID: ${dialog.id})`);
     setSelectedDialog(dialog);
     loadInboxHistory(dialog.id);
   };
