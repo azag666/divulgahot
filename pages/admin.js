@@ -1707,10 +1707,10 @@ export default function AdminPanel() {
 
         {/* --- ABA INBOX VIEWER --- */}
         {tab === 'inbox' && (
-            <div style={{display:'grid', gridTemplateColumns:'380px 1fr', gap:'20px', height:'750px'}}>
+            <div style={{display:'grid', gridTemplateColumns:'420px 1fr', gap:'25px', height:'850px'}}>
                 
                 {/* PAINEL ESQUERDO: SELEÇÃO DE NÚMERO E DIÁLOGOS */}
-                <div style={{display:'flex', flexDirection:'column', gap:'15px'}}>
+                <div style={{display:'flex', flexDirection:'column', gap:'20px'}}>
                     
                     {/* SELETORES DE TELEFONE */}
                     <div style={{backgroundColor: '#161b22', padding: '20px', borderRadius:'12px', border:'1px solid #30363d'}}>
@@ -1779,28 +1779,36 @@ export default function AdminPanel() {
                                     {selectedInboxPhone ? 'Nenhum diálogo encontrado' : 'Selecione um número para começar'}
                                 </div>
                             ) : (
-                                <div style={{display:'flex', flexDirection:'column', gap:'6px'}}>
+                                <div style={{display:'flex', flexDirection:'column', gap:'10px'}}>
                                     {inboxDialogs.map(dialog => (
                                         <div
                                             key={dialog.id}
                                             onClick={() => selectDialog(dialog)}
                                             style={{
-                                                padding:'12px',
+                                                padding:'16px',
                                                 background: selectedDialog?.id === dialog.id ? '#e34234' : '#0d1117',
-                                                border: '1px solid #30363d',
-                                                borderRadius:'8px',
+                                                border: selectedDialog?.id === dialog.id ? '2px solid #e34234' : '1px solid #30363d',
+                                                borderRadius:'16px',
                                                 cursor:'pointer',
-                                                transition:'all 0.2s',
-                                                position: 'relative'
+                                                transition:'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                                                position: 'relative',
+                                                transform: selectedDialog?.id === dialog.id ? 'scale(1.02)' : 'scale(1)',
+                                                boxShadow: selectedDialog?.id === dialog.id ? 
+                                                    '0 8px 32px rgba(227, 66, 52, 0.3)' : 
+                                                    '0 2px 8px rgba(0, 0, 0, 0.1)'
                                             }}
                                             onMouseEnter={(e) => {
                                                 if (selectedDialog?.id !== dialog.id) {
                                                     e.target.style.background = '#21262d';
+                                                    e.target.style.transform = 'translateX(6px) scale(1.01)';
+                                                    e.target.style.boxShadow = '0 4px 16px rgba(0, 0, 0, 0.2)';
                                                 }
                                             }}
                                             onMouseLeave={(e) => {
                                                 if (selectedDialog?.id !== dialog.id) {
                                                     e.target.style.background = '#0d1117';
+                                                    e.target.style.transform = 'translateX(0) scale(1)';
+                                                    e.target.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.1)';
                                                 }
                                             }}
                                         >
@@ -1808,44 +1816,48 @@ export default function AdminPanel() {
                                             {dialog.unreadCount > 0 && (
                                                 <div style={{
                                                     position: 'absolute',
-                                                    top: '8px',
-                                                    right: '8px',
-                                                    background: '#e34234',
+                                                    top: '10px',
+                                                    right: '10px',
+                                                    background: 'linear-gradient(135deg, #e34234 0%, #f85149 100%)',
                                                     color: 'white',
                                                     borderRadius: '50%',
-                                                    width: '20px',
-                                                    height: '20px',
+                                                    width: '24px',
+                                                    height: '24px',
                                                     display: 'flex',
                                                     alignItems: 'center',
                                                     justifyContent: 'center',
                                                     fontSize: '10px',
-                                                    fontWeight: 'bold'
+                                                    fontWeight: 'bold',
+                                                    boxShadow: '0 4px 12px rgba(227, 66, 52, 0.4)',
+                                                    animation: 'pulse 2s infinite'
                                                 }}>
                                                     {dialog.unreadCount > 99 ? '99+' : dialog.unreadCount}
                                                 </div>
                                             )}
                                             
-                                            <div style={{display:'flex', alignItems:'center', gap:'10px', marginBottom:'6px'}}>
+                                            <div style={{display:'flex', alignItems:'center', gap:'14px', marginBottom:'10px'}}>
                                                 {dialog.photo ? (
                                                     <img 
                                                         src={dialog.photo} 
                                                         alt="" 
-                                                        style={{width:'40px', height:'40px', borderRadius:'50%', objectFit:'cover', border: '2px solid #30363d'}}
+                                                        style={{width:'48px', height:'48px', borderRadius:'50%', objectFit:'cover', border: '3px solid #30363d', boxShadow: '0 2px 8px rgba(0,0,0,0.2)'}}
                                                     />
                                                 ) : (
                                                     <div style={{
-                                                        width:'40px',
-                                                        height:'40px',
+                                                        width:'48px',
+                                                        height:'48px',
                                                         borderRadius:'50%',
-                                                        background: dialog.type === 'Usuário' ? '#238636' : 
-                                                                   dialog.type === 'Bot' ? '#8957e5' :
-                                                                   dialog.type === 'Grupo' ? '#d29922' :
-                                                                   dialog.type === 'Canal' ? '#1f6feb' : '#30363d',
+                                                        background: dialog.type === 'Usuário' ? 'linear-gradient(135deg, #238636 0%, #2ea043 100%)' : 
+                                                                   dialog.type === 'Bot' ? 'linear-gradient(135deg, #8957e5 0%, #a371f7 100%)' :
+                                                                   dialog.type === 'Grupo' ? 'linear-gradient(135deg, #d29922 0%, #f7ba40 100%)' :
+                                                                   dialog.type === 'Canal' ? 'linear-gradient(135deg, #1f6feb 0%, #58a6ff 100%)' : '#30363d',
                                                         display:'flex',
                                                         alignItems:'center',
                                                         justifyContent:'center',
-                                                        fontSize:'18px',
-                                                        color:'white'
+                                                        fontSize:'22px',
+                                                        color:'white',
+                                                        border: '3px solid #30363d',
+                                                        boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
                                                     }}>
                                                         {dialog.type === 'Usuário' ? '👤' :
                                                          dialog.type === 'Bot' ? '🤖' :
@@ -1854,13 +1866,13 @@ export default function AdminPanel() {
                                                     </div>
                                                 )}
                                                 <div style={{flex:1, minWidth:0}}>
-                                                    <div style={{color:'white', fontSize:'14px', fontWeight:'bold', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', display:'flex', alignItems:'center', gap:'5px'}}>
+                                                    <div style={{color:'white', fontSize:'16px', fontWeight:'bold', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', display:'flex', alignItems:'center', gap:'8px', lineHeight:'1.2'}}>
                                                         {dialog.title}
-                                                        {dialog.isVerified && <span style={{color:'#58a6ff'}}>✓</span>}
-                                                        {dialog.isScam && <span style={{color:'#f85149'}}>⚠️</span>}
+                                                        {dialog.isVerified && <span style={{color:'#58a6ff', fontSize:'14px'}}>✓</span>}
+                                                        {dialog.isScam && <span style={{color:'#f85149', fontSize:'14px'}}>⚠️</span>}
                                                     </div>
-                                                    <div style={{color:'#8b949e', fontSize:'11px', display:'flex', alignItems:'center', gap:'5px'}}>
-                                                        <span>{dialog.type}</span>
+                                                    <div style={{color:'#8b949e', fontSize:'11px', display:'flex', alignItems:'center', gap:'8px', marginTop:'4px'}}>
+                                                        <span style={{padding:'2px 6px', background:'rgba(139,148,158,0.2)', borderRadius:'4px'}}>{dialog.type}</span>
                                                         {dialog.participantsCount > 0 && <span>• {dialog.participantsCount} membros</span>}
                                                         {dialog.username && <span>• @{dialog.username}</span>}
                                                     </div>
@@ -1868,13 +1880,13 @@ export default function AdminPanel() {
                                             </div>
                                             
                                             {dialog.lastMessage && (
-                                                <div style={{color:'#8b949e', fontSize:'12px', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>
+                                                <div style={{color:'#8b949e', fontSize:'13px', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', lineHeight:'1.4', paddingLeft:'62px'}}>
                                                     {dialog.lastMessage}
                                                 </div>
                                             )}
                                             
                                             {dialog.lastMessageDate && (
-                                                <div style={{color:'#8b949e', fontSize:'10px', marginTop:'4px'}}>
+                                                <div style={{color:'#8b949e', fontSize:'10px', marginTop:'8px', fontWeight:'500', paddingLeft:'62px'}}>
                                                     {formatMessageTime(dialog.lastMessageDate)}
                                                 </div>
                                             )}
@@ -1886,73 +1898,91 @@ export default function AdminPanel() {
                     </div>
                 </div>
 
-                {/* PAINEL DIREITO: HISTÓRICO DE MENSAGENS */}
-                <div style={{backgroundColor: '#161b22', padding: '20px', borderRadius:'12px', border:'1px solid #30363d', display:'flex', flexDirection:'column'}}>
+                {/* PAINEL DIREITO: HISTÓRICO DE MENSAGENS OTIMIZADO */}
+                <div style={{backgroundColor: '#161b22', padding: '0', borderRadius:'16px', border:'1px solid #30363d', display:'flex', flexDirection:'column', overflow:'hidden', boxShadow:'0 4px 16px rgba(0,0,0,0.2)'}}>
                     
                     {selectedDialog ? (
                         <>
-                            <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'20px', paddingBottom:'15px', borderBottom:'1px solid #30363d'}}>
-                                <div style={{display:'flex', alignItems:'center', gap:'12px'}}>
-                                    {selectedDialog.photo ? (
-                                        <img 
-                                            src={selectedDialog.photo} 
-                                            alt="" 
-                                            style={{width:'45px', height:'45px', borderRadius:'50%', objectFit:'cover', border: '2px solid #30363d'}}
-                                        />
-                                    ) : (
-                                        <div style={{
-                                            width:'45px',
-                                            height:'45px',
-                                            borderRadius:'50%',
-                                            background: selectedDialog.type === 'Usuário' ? '#238636' : 
-                                                       selectedDialog.type === 'Bot' ? '#8957e5' :
-                                                       selectedDialog.type === 'Grupo' ? '#d29922' :
-                                                       selectedDialog.type === 'Canal' ? '#1f6feb' : '#30363d',
-                                            display:'flex',
-                                            alignItems:'center',
-                                            justifyContent:'center',
-                                            fontSize:'20px',
-                                            color:'white'
-                                        }}>
-                                            {selectedDialog.type === 'Usuário' ? '👤' :
-                                             selectedDialog.type === 'Bot' ? '🤖' :
-                                             selectedDialog.type === 'Grupo' ? '👥' :
-                                             selectedDialog.type === 'Canal' ? '📢' : '💬'}
-                                        </div>
-                                    )}
-                                    <div style={{flex:1}}>
-                                        <h3 style={{margin:0, color:'white', fontSize:'18px', display:'flex', alignItems:'center', gap:'8px'}}>
-                                            {selectedDialog.title}
-                                            {selectedDialog.isVerified && <span style={{color:'#58a6ff'}}>✓</span>}
-                                            {selectedDialog.isScam && <span style={{color:'#f85149'}}>⚠️</span>}
-                                        </h3>
-                                        <div style={{color:'#8b949e', fontSize:'12px', display:'flex', alignItems:'center', gap:'8px'}}>
-                                            <span>{selectedDialog.type}</span>
-                                            {selectedDialog.participantsCount > 0 && <span>• {selectedDialog.participantsCount} membros</span>}
-                                            {selectedDialog.username && <span>• @{selectedDialog.username}</span>}
-                                            {selectedDialog.unreadCount > 0 && <span style={{color:'#e34234', fontWeight:'bold'}}>• {selectedDialog.unreadCount} não lidos</span>}
+                            {/* HEADER DO CHAT */}
+                            <div style={{padding:'24px', borderBottom:'1px solid #30363d', background:'linear-gradient(135deg, #0d1117 0%, #161b22 100%)'}}>
+                                <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+                                    <div style={{display:'flex', alignItems:'center', gap:'16px'}}>
+                                        {selectedDialog.photo ? (
+                                            <img 
+                                                src={selectedDialog.photo} 
+                                                alt="" 
+                                                style={{width:'52px', height:'52px', borderRadius:'50%', objectFit:'cover', border: '3px solid #30363d', boxShadow:'0 4px 12px rgba(0,0,0,0.3)'}}
+                                            />
+                                        ) : (
+                                            <div style={{
+                                                width:'52px',
+                                                height:'52px',
+                                                borderRadius:'50%',
+                                                background: selectedDialog.type === 'Usuário' ? 'linear-gradient(135deg, #238636 0%, #2ea043 100%)' : 
+                                                           selectedDialog.type === 'Bot' ? 'linear-gradient(135deg, #8957e5 0%, #a371f7 100%)' :
+                                                           selectedDialog.type === 'Grupo' ? 'linear-gradient(135deg, #d29922 0%, #f7ba40 100%)' :
+                                                           selectedDialog.type === 'Canal' ? 'linear-gradient(135deg, #1f6feb 0%, #58a6ff 100%)' : '#30363d',
+                                                display:'flex',
+                                                alignItems:'center',
+                                                justifyContent:'center',
+                                                fontSize:'24px',
+                                                color:'white',
+                                                border: '3px solid #30363d',
+                                                boxShadow:'0 4px 12px rgba(0,0,0,0.3)'
+                                            }}>
+                                                {selectedDialog.type === 'Usuário' ? '👤' :
+                                                 selectedDialog.type === 'Bot' ? '🤖' :
+                                                 selectedDialog.type === 'Grupo' ? '👥' :
+                                                 selectedDialog.type === 'Canal' ? '📢' : '💬'}
+                                            </div>
+                                        )}
+                                        <div style={{flex:1}}>
+                                            <h3 style={{margin:0, color:'white', fontSize:'20px', display:'flex', alignItems:'center', gap:'10px', fontWeight:'600'}}>
+                                                {selectedDialog.title}
+                                                {selectedDialog.isVerified && <span style={{color:'#58a6ff', fontSize:'16px'}}>✓</span>}
+                                                {selectedDialog.isScam && <span style={{color:'#f85149', fontSize:'16px'}}>⚠️</span>}
+                                            </h3>
+                                            <div style={{color:'#8b949e', fontSize:'13px', display:'flex', alignItems:'center', gap:'10px', marginTop:'4px'}}>
+                                                <span style={{padding:'4px 8px', background:'rgba(139,148,158,0.2)', borderRadius:'6px', fontWeight:'500'}}>{selectedDialog.type}</span>
+                                                {selectedDialog.participantsCount > 0 && <span>• {selectedDialog.participantsCount} membros</span>}
+                                                {selectedDialog.username && <span>• @{selectedDialog.username}</span>}
+                                                {selectedDialog.unreadCount > 0 && <span style={{color:'#e34234', fontWeight:'bold'}}>• {selectedDialog.unreadCount} não lidos</span>}
+                                            </div>
                                         </div>
                                     </div>
+                                    
+                                    <button 
+                                        onClick={refreshHistory}
+                                        disabled={loadingInboxHistory}
+                                        style={{
+                                            background: 'linear-gradient(135deg, #21262d 0%, #30363d 100%)',
+                                            border: '1px solid #30363d',
+                                            color: '#58a6ff',
+                                            padding: '10px 20px',
+                                            borderRadius: '12px',
+                                            cursor: loadingInboxHistory ? 'not-allowed' : 'pointer',
+                                            fontSize: '13px',
+                                            display:'flex',
+                                            alignItems:'center',
+                                            gap:'8px',
+                                            fontWeight:'500',
+                                            boxShadow:'0 2px 8px rgba(0,0,0,0.2)',
+                                            transition:'all 0.2s ease'
+                                        }}
+                                        onMouseEnter={(e) => {
+                                            if (!loadingInboxHistory) {
+                                                e.target.style.background = 'linear-gradient(135deg, #30363d 0%, #21262d 100%)';
+                                                e.target.style.transform = 'translateY(-2px)';
+                                            }
+                                        }}
+                                        onMouseLeave={(e) => {
+                                            e.target.style.background = 'linear-gradient(135deg, #21262d 0%, #30363d 100%)';
+                                            e.target.style.transform = 'translateY(0)';
+                                        }}
+                                    >
+                                        {loadingInboxHistory ? '⏳' : '🔄'} Atualizar
+                                    </button>
                                 </div>
-                                
-                                <button 
-                                    onClick={refreshHistory}
-                                    disabled={loadingInboxHistory}
-                                    style={{
-                                        background: '#21262d',
-                                        border: '1px solid #30363d',
-                                        color: '#58a6ff',
-                                        padding: '8px 16px',
-                                        borderRadius: '6px',
-                                        cursor: loadingInboxHistory ? 'not-allowed' : 'pointer',
-                                        fontSize: '12px',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: '5px'
-                                    }}
-                                >
-                                    {loadingInboxHistory ? '⏳' : '🔄'} Atualizar
-                                </button>
                             </div>
 
                             <div style={{flex:1, overflowY:'auto', marginBottom:'15px', paddingRight:'10px'}}>
