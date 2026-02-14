@@ -10,7 +10,7 @@ const apiHash = process.env.TELEGRAM_API_HASH;
 export default async function handler(req, res) {
   // Aplica autenticação
   await authenticate(req, res, async () => {
-    const { phone, chatId } = req.body;
+    const { phone, chatId, limit = 50 } = req.body;
     
     const { data: sessionData } = await supabase
       .from('telegram_sessions')
@@ -32,34 +32,84 @@ export default async function handler(req, res) {
   try {
     await client.connect();
     
-    // Pega as últimas 15 mensagens
-    const msgs = await client.getMessages(chatId, { limit: 15 });
+    // Pega as mensagens com limite configurável (máximo 50)
+    const messageLimit = Math.min(parseInt(limit) || 50, 50);
+    const msgs = await client.getMessages(chatId, { limit: messageLimit });
     
     const history = [];
 
     for (const m of msgs) {
         let mediaBase64 = null;
+        let mediaType = null;
+        let fileName = null;
         
-        // Tenta baixar foto se existir
-        if (m.media && m.media.photo) {
+        // Processa diferentes tipos de mídia
+        if (m.media) {
             try {
-                const buffer = await client.downloadMedia(m, { workers: 1 });
-                if (buffer) {
-                    mediaBase64 = `data:image/jpeg;base64,${buffer.toString('base64')}`;
+                if (m.media.photo) {
+                    // Download de foto
+                    const buffer = await client.downloadMedia(m, { workers: 1 });
+                    if (buffer) {
+                        mediaBase64 = `data:image/jpeg;base64,${buffer.toString('base64')}`;
+                        mediaType = 'photo';
+                    }
+                } else if (m.media.video) {
+                    // Download de vídeo (thumbnail como preview)
+                    const buffer = await client.downloadMedia(m, { workers: 1 });
+                    if (buffer) {
+                        mediaBase64 = `data:video/mp4;base64,${buffer.toString('base64')}`;
+                        mediaType = 'video';
+                    }
+                } else if (m.media.document) {
+                    // Download de documento
+                    const buffer = await client.downloadMedia(m, { workers: 1 });
+                    if (buffer) {
+                        const mimeType = m.media.document.mimeType || 'application/octet-stream';
+                        mediaBase64 = `data:${mimeType};base64,${buffer.toString('base64')}`;
+                        mediaType = 'document';
+                        fileName = m.media.document.fileName || 'documento';
+                    }
+                } else if (m.media.audio) {
+                    // Download de áudio
+                    const buffer = await client.downloadMedia(m, { workers: 1 });
+                    if (buffer) {
+                        mediaBase64 = `data:audio/mpeg;base64,${buffer.toString('base64')}`;
+                        mediaType = 'audio';
+                    }
                 }
             } catch (err) {
                 console.log('Erro mídia:', err.message);
+                mediaType = 'error';
+            }
+        }
+
+        // Extrai links do texto da mensagem
+        const links = [];
+        if (m.message) {
+            const urlRegex = /(https?:\/\/[^\s]+)/g;
+            const matches = m.message.match(urlRegex);
+            if (matches) {
+                links.push(...matches);
             }
         }
 
         history.push({
             id: m.id,
             text: m.message || '',
-            sender: m.sender?.firstName || 'Desconhecido',
+            sender: m.sender?.firstName || m.sender?.username || 'Desconhecido',
+            senderId: m.senderId?.toString() || null,
             isOut: m.out,
             date: m.date,
             media: mediaBase64,
-            hasMedia: !!m.media
+            mediaType: mediaType,
+            fileName: fileName,
+            hasMedia: !!m.media,
+            links: links,
+            replyTo: m.replyTo?.replyToMsgId || null,
+            forwarded: m.fwdFrom ? {
+                from: m.fwdFrom.fromName || 'Desconhecido',
+                date: m.fwdFrom.date
+            } : null
         });
     }
 
