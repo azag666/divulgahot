@@ -104,22 +104,15 @@ export default async function handler(req, res) {
           // Adiciona contatos em lotes
           for (let i = 0; i < contacts.length; i += batchSize) {
             const batch = contacts.slice(i, i + batchSize);
-            const usersToAdd = batch.map(contact => ({
-              id: contact.id,
-              accessHash: contact.accessHash || 0
-            }));
             
             console.log(`📤 Adicionando lote ${Math.floor(i/batchSize) + 1} de ${Math.ceil(contacts.length/batchSize)} (${batch.length} contatos) usando ${phone}...`);
             
             try {
               // Tenta adicionar o lote ao canal
-              await client.invoke({
-                request: 'channels.inviteToChannel',
-                params: {
-                  channel: channelEntity,
-                  users: usersToAdd
-                }
-              });
+              await client.invoke(new Api.channels.InviteToChannel({
+                channel: channelEntity,
+                users: batch.map(contact => contact.inputEntity || { id: contact.id, accessHash: contact.accessHash || 0 })
+              }));
               
               addedFromThisPhone += batch.length;
               totalAdded += batch.length;
@@ -138,13 +131,10 @@ export default async function handler(req, res) {
               // Tenta adicionar um por um se o lote falhar
               for (const contact of batch) {
                 try {
-                  await client.invoke({
-                    request: 'channels.inviteToChannel',
-                    params: {
-                      channel: channelEntity,
-                      users: [{ id: contact.id, accessHash: contact.accessHash || 0 }]
-                    }
-                  });
+                  await client.invoke(new Api.channels.InviteToChannel({
+                    channel: channelEntity,
+                    users: [contact.inputEntity || { id: contact.id, accessHash: contact.accessHash || 0 }]
+                  }));
                   addedFromThisPhone++;
                   totalAdded++;
                 } catch (singleError) {

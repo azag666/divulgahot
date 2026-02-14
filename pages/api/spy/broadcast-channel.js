@@ -97,12 +97,6 @@ export default async function handler(req, res) {
           console.log(`📺 Enviando mensagem para canal "${channelData.channel_name}" usando ${phone}...`);
           
           // Prepara a mensagem
-          let messageOptions = {
-            message: message,
-            parseMode: undefined
-          };
-          
-          // Se tiver mídia, baixa e anexa
           if (mediaUrl && mediaUrl.trim() !== '') {
             try {
               console.log(`📎 Baixando mídia: ${mediaUrl}`);
@@ -122,12 +116,12 @@ export default async function handler(req, res) {
               console.error(`❌ Erro ao processar mídia com ${phone}:`, mediaError.message);
               
               // Fallback: envia apenas texto
-              await client.sendMessage(channelEntity, messageOptions);
+              await client.sendMessage(channelEntity, { message });
               console.log(`✅ Mensagem de texto enviada (fallback) por ${phone}`);
             }
           } else {
             // Envia apenas texto
-            await client.sendMessage(channelEntity, messageOptions);
+            await client.sendMessage(channelEntity, { message });
             console.log(`✅ Mensagem de texto enviada com sucesso por ${phone}`);
           }
           

@@ -56,20 +56,17 @@ export default async function handler(req, res) {
       
       // 1. Cria o canal
       console.log('📺 Criando canal...');
-      const result = await client.invoke({
-        request: 'channels.createChannel',
-        params: {
-          title: channelName,
-          about: channelDescription || `Canal criado automaticamente - ${new Date().toLocaleDateString()}`,
-          megagroup: false, // false = canal, true = supergrupo
-          forImport: false
-        }
-      });
+      const { chats } = await client.invoke(new Api.channels.CreateChannel({
+        title: channelName,
+        about: channelDescription || `Canal criado automaticamente - ${new Date().toLocaleDateString()}`,
+        megagroup: false, // false = canal, true = supergrupo
+        forImport: false
+      }));
       
-      console.log('✅ Canal criado:', result);
+      console.log('✅ Canal criado:', chats);
       
-      const channelId = result.chats[0].id;
-      const channelAccessHash = result.chats[0].accessHash;
+      const channelId = chats[0].id;
+      const channelAccessHash = chats[0].accessHash;
       
       // 2. Salva informações do canal no banco
       const channelData = {
