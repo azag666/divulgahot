@@ -63,54 +63,113 @@ export default async function handler(req, res) {
             finalPeer = await client.getInputEntity(BigInt(target));
         } catch (e) {
             // Falhou no cache simples. Vamos para táticas avançadas.
-            
-            // --- NÍVEL 3: Tática do Grupo de Origem (Se tivermos o ID do Grupo) ---
+
+            // --- NÍVEL 3: Tática do Grupo de Origem (obter accessHash do grupo) ---
             if (originChatId) {
                 try {
-                    // Tenta "ver" o usuário dentro do canal/grupo de onde ele veio
-                    // Isso força o Telegram a entregar a hash de acesso
                     const channels = await client.invoke(new Api.channels.GetParticipants({
-                        channel: BigInt(originChatId),
+                        channel: await client.getInputEntity(originChatId),
                         filter: new Api.ChannelParticipantsIds({ inputIds: [BigInt(target)] }),
                         offset: 0,
                         limit: 1,
-                        hash: 0
+                        hash: BigInt(0)
                     }));
-                    
+
                     if (channels.users && channels.users.length > 0) {
-                        finalPeer = channels.users[0]; // Pegamos a entidade válida!
+                        const user = channels.users[0];
+                        const accessHash = user.accessHash ?? user.access_hash ?? BigInt(0);
+                        finalPeer = new Api.InputPeerUser({
+                            userId: BigInt(user.id ?? user.userId ?? target),
+                            accessHash: accessHash
+                        });
                     }
                 } catch (grpErr) {
                     // Ignora erro de grupo (pode ser que a conta não esteja mais lá)
                 }
             }
 
-            // --- NÍVEL 4: Tática "Importação Relâmpago" (Último Recurso) ---
+            // --- NÍVEL 4: Envio direto pelo ID (tenta sem resolver peer antes) ---
+            if (!finalPeer && target) {
+                try {
+                    const directPeer = new Api.InputPeerUser({
+                        userId: BigInt(target),
+                        accessHash: BigInt(0)
+                    });
+                    const action = imageUrl ? new Api.SendMessageUploadPhotoAction() : new Api.SendMessageTypingAction();
+                    await client.invoke(new Api.messages.SetTyping({ peer: directPeer, action }));
+                    await new Promise(r => setTimeout(r, Math.floor(Math.random() * 2000) + 1500));
+
+                    let sentMsg;
+                    if (imageUrl) {
+                        const mediaRes = await fetch(imageUrl);
+                        if (mediaRes.ok) {
+                            const buffer = Buffer.from(await mediaRes.arrayBuffer());
+                            const toUpload = new CustomFile("img.jpg", buffer.byteLength, "image/jpeg", buffer);
+                            const uploadedFile = await client.uploadFile({ file: toUpload, workers: 1 });
+                            sentMsg = await client.sendMessage(directPeer, { message: finalMessage, file: uploadedFile, parseMode: "markdown" });
+                        }
+                    } else {
+                        sentMsg = await client.sendMessage(directPeer, { message: finalMessage, parseMode: "markdown", linkPreview: true });
+                    }
+                    if (sentMsg) {
+                        try {
+                            await client.deleteMessages(directPeer, [sentMsg.id], { revoke: false });
+                        } catch (delE) {}
+                        await client.disconnect();
+                        if (leadDbId) await supabase.from('leads_hottrack').update({ status: 'sent', last_contacted_at: new Date() }).eq('id', leadDbId);
+                        return res.status(200).json({ success: true });
+                    }
+                } catch (directErr) {
+                    // Envio direto falhou, continua para próximas estratégias
+                }
+            }
+
+            // --- NÍVEL 5: AddContact (adicionar como contato pelo ID) ---
+            if (!finalPeer && target) {
+                try {
+                    await client.invoke(new Api.contacts.AddContact({
+                        id: new Api.InputUser({
+                            userId: BigInt(target),
+                            accessHash: BigInt(0)
+                        }),
+                        firstName: "Contato",
+                        lastName: "",
+                        phone: ""
+                    }));
+                    await new Promise(r => setTimeout(r, 500));
+                    finalPeer = await client.getInputEntity(BigInt(target));
+                    // Mantém contato temporariamente para aumentar chances de entrega
+                } catch (addErr) {
+                    // AddContact falhou, tenta ImportContacts
+                }
+            }
+
+            // --- NÍVEL 6: ImportContacts (último recurso) ---
             if (!finalPeer) {
                 try {
-                    // Adiciona como contato temporário para furar a privacidade
                     await client.invoke(new Api.contacts.ImportContacts({
                         contacts: [new Api.InputPhoneContact({
                             clientId: BigInt(1),
-                            phone: "", 
-                            firstName: "L", 
-                            lastName: target.toString() // Usa o ID como sobrenome pra identificar
+                            phone: "",
+                            firstName: "L",
+                            lastName: target.toString()
                         })]
                     }));
-                    
-                    // Agora tenta resolver de novo (agora ele é um contato!)
+                    await new Promise(r => setTimeout(r, 500));
                     finalPeer = await client.getInputEntity(BigInt(target));
-                    
-                    // Limpeza: Deleta o contato imediatamente para não sujar a conta
-                    await client.invoke(new Api.contacts.DeleteContacts({id: [finalPeer]}));
                 } catch (contactErr) {
-                    // Se falhar aqui, o usuário realmente blindou a conta ou não existe
                     await client.disconnect();
                     if (leadDbId) await supabase.from('leads_hottrack').update({ status: 'failed', message_log: 'Inacessível/Privado' }).eq('id', leadDbId);
                     return res.status(404).json({ error: "Lead blindado." });
                 }
             }
         }
+    }
+
+    if (!finalPeer) {
+      await client.disconnect();
+      if (leadDbId) await supabase.from('leads_hottrack').update({ status: 'failed', message_log: 'Lead inacessível' }).eq('id', leadDbId);
+      return res.status(404).json({ error: "Lead inacessível." });
     }
 
     // --- DISPARO (Com Delay Humano) ---

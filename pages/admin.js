@@ -9,6 +9,18 @@ export default function AdminPanel() {
   const [adminTokenInput, setAdminTokenInput] = useState('');
   const [authToken, setAuthToken] = useState('');
   const [isAdmin, setIsAdmin] = useState(false);
+
+  // --- CONFIG DO USUÁRIO (REDIRECT/PRESSEL) ---
+  const [myRedirectUrl, setMyRedirectUrl] = useState('');
+  const [savingRedirect, setSavingRedirect] = useState(false);
+
+  // --- GESTÃO DE USERS (ADMIN) ---
+  const [newUserUsername, setNewUserUsername] = useState('');
+  const [newUserPassword, setNewUserPassword] = useState('');
+  const [newUserRedirectUrl, setNewUserRedirectUrl] = useState('');
+  const [creatingUser, setCreatingUser] = useState(false);
+  const [createdUser, setCreatedUser] = useState(null);
+  const [usersList, setUsersList] = useState([]);
   
   // --- NAVEGAÇÃO ---
   const [tab, setTab] = useState('dashboard'); 
@@ -103,8 +115,40 @@ export default function AdminPanel() {
     // Se já estiver autenticado, busca os dados atualizados do servidor
     if (isAuthenticated && authToken) {
         fetchData();
+        // Carrega grupos e canais escaneados do servidor
+        loadScannedChatsFromServer();
+        // Carrega grupos criados (criação inteligente) do servidor
+        loadCreatedGroupsFromServer();
     }
   }, [isAuthenticated, authToken]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !authToken) return;
+
+    const run = async () => {
+      if (!isAdmin) {
+        try {
+          const res = await authenticatedFetch('/api/user/update-redirect', { method: 'GET' });
+          const data = await res.json();
+          if (res.ok && data?.success) {
+            setMyRedirectUrl(data.redirect_url || '');
+          }
+        } catch (e) {}
+      }
+
+      if (isAdmin) {
+        try {
+          const res = await authenticatedFetch('/api/admin/list-users', { method: 'GET' });
+          const data = await res.json();
+          if (res.ok && data?.success) {
+            setUsersList(data.users || []);
+          }
+        } catch (e) {}
+      }
+    };
+
+    run();
+  }, [isAuthenticated, authToken, isAdmin]);
 
   // Função helper para fazer requisições autenticadas
   const authenticatedFetch = async (url, options = {}) => {
@@ -114,6 +158,73 @@ export default function AdminPanel() {
       ...options.headers
     };
     return fetch(url, { ...options, headers });
+  };
+
+  // Carrega grupos e canais escaneados do servidor
+  const loadScannedChatsFromServer = async () => {
+    try {
+      const res = await authenticatedFetch('/api/spy/get-scanned-chats');
+      if (!res.ok) {
+        // Se a tabela não existir ainda, retorna silenciosamente
+        if (res.status === 500) {
+          console.warn('Tabela scanned_chats pode não existir ainda. Criando...');
+          return;
+        }
+        return;
+      }
+
+      const data = await res.json();
+      if (data.success && (data.groups.length > 0 || data.channels.length > 0)) {
+        // Mescla com dados do localStorage (servidor tem prioridade)
+        const localGroups = JSON.parse(localStorage.getItem('godModeGroups') || '[]');
+        const localChannels = JSON.parse(localStorage.getItem('godModeChannels') || '[]');
+        
+        // Cria mapas para evitar duplicatas (servidor tem prioridade)
+        const serverGroupsMap = new Map(data.groups.map(g => [g.id, g]));
+        const serverChannelsMap = new Map(data.channels.map(c => [c.id, c]));
+        
+        // Adiciona grupos do localStorage que não estão no servidor
+        for (const localGroup of localGroups) {
+          if (!serverGroupsMap.has(localGroup.id)) {
+            serverGroupsMap.set(localGroup.id, localGroup);
+          }
+        }
+        
+        // Adiciona canais do localStorage que não estão no servidor
+        for (const localChannel of localChannels) {
+          if (!serverChannelsMap.has(localChannel.id)) {
+            serverChannelsMap.set(localChannel.id, localChannel);
+          }
+        }
+        
+        // Converte mapas de volta para arrays e ordena
+        const mergedGroups = Array.from(serverGroupsMap.values()).sort((a, b) => (b.participantsCount || 0) - (a.participantsCount || 0));
+        const mergedChannels = Array.from(serverChannelsMap.values()).sort((a, b) => (b.participantsCount || 0) - (a.participantsCount || 0));
+        
+        setAllGroups(mergedGroups);
+        setAllChannels(mergedChannels);
+        
+        // Atualiza localStorage com dados mesclados
+        localStorage.setItem('godModeGroups', JSON.stringify(mergedGroups));
+        localStorage.setItem('godModeChannels', JSON.stringify(mergedChannels));
+      }
+    } catch (error) {
+      console.error('Erro ao carregar chats escaneados do servidor:', error);
+      // Em caso de erro, mantém dados do localStorage
+    }
+  };
+
+  const loadCreatedGroupsFromServer = async () => {
+    try {
+      const res = await authenticatedFetch('/api/get-created-groups');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.success && Array.isArray(data.groups)) {
+        setCreatedGroups(data.groups);
+      }
+    } catch (e) {
+      console.warn('Erro ao carregar grupos criados do servidor:', e);
+    }
   };
 
   const fetchData = async () => {
@@ -213,7 +324,66 @@ export default function AdminPanel() {
     setIsAuthenticated(false);
     setAuthToken('');
     setIsAdmin(false);
+    setCreatedUser(null);
     localStorage.removeItem('authToken');
+  };
+
+  const handleSaveRedirectUrl = async () => {
+    setSavingRedirect(true);
+    try {
+      const res = await authenticatedFetch('/api/user/update-redirect', {
+        method: 'POST',
+        body: JSON.stringify({ redirectUrl: myRedirectUrl })
+      });
+      const data = await res.json();
+      if (res.ok && data?.success) {
+        setMyRedirectUrl(data.redirect_url || '');
+        addLog('✅ Redirect/Pressel atualizado.');
+      } else {
+        alert(data?.error || 'Falha ao salvar redirect.');
+      }
+    } catch (e) {
+      alert('Erro de conexão ao salvar redirect.');
+    }
+    setSavingRedirect(false);
+  };
+
+  const handleCreateUser = async () => {
+    if (!newUserUsername || !newUserPassword) {
+      alert('Informe username e senha do novo usuário.');
+      return;
+    }
+    setCreatingUser(true);
+    setCreatedUser(null);
+    try {
+      const res = await authenticatedFetch('/api/admin/create-user', {
+        method: 'POST',
+        body: JSON.stringify({
+          username: newUserUsername,
+          password: newUserPassword,
+          redirectUrl: newUserRedirectUrl
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data?.success && data?.user) {
+        setCreatedUser(data.user);
+        setNewUserUsername('');
+        setNewUserPassword('');
+        setNewUserRedirectUrl('');
+        addLog(`✅ Usuário criado: ${data.user.username}`);
+
+        try {
+          const lr = await authenticatedFetch('/api/admin/list-users', { method: 'GET' });
+          const ld = await lr.json();
+          if (lr.ok && ld?.success) setUsersList(ld.users || []);
+        } catch (e) {}
+      } else {
+        alert(data?.error || 'Falha ao criar usuário.');
+      }
+    } catch (e) {
+      alert('Erro de conexão ao criar usuário.');
+    }
+    setCreatingUser(false);
   };
 
   // ==============================================================================
@@ -455,9 +625,31 @@ export default function AdminPanel() {
       setAllGroups(uniqueGroups);
       setAllChannels(uniqueChannels);
       
-      // Salva no navegador
+      // Salva no navegador (cache rápido)
       localStorage.setItem('godModeGroups', JSON.stringify(uniqueGroups));
       localStorage.setItem('godModeChannels', JSON.stringify(uniqueChannels));
+      
+      // Salva no servidor (persistência)
+      try {
+        const saveRes = await authenticatedFetch('/api/spy/save-scanned-chats', {
+          method: 'POST',
+          body: JSON.stringify({
+            groups: uniqueGroups,
+            channels: uniqueChannels
+          })
+        });
+        
+        if (saveRes.ok) {
+          const saveData = await saveRes.json();
+          addLog(`✅ ${saveData.saved || 0} chats salvos no servidor`);
+        } else {
+          console.warn('Erro ao salvar chats no servidor:', await saveRes.text());
+          // Não bloqueia o processo se falhar ao salvar no servidor
+        }
+      } catch (saveError) {
+        console.error('Erro ao salvar chats no servidor:', saveError);
+        // Não bloqueia o processo se falhar ao salvar no servidor
+      }
       
       setIsScanning(false);
   };
@@ -554,7 +746,7 @@ export default function AdminPanel() {
     if (selectedPhones.size === 0) return alert('Selecione contas infectadas para criar grupos!');
     if (!groupNameTemplate.trim()) return alert('Digite um nome para os grupos!');
     
-    if (!confirm(`⚠️ CRIAR GRUPOS INTELIGENTES?\n\n• Nome: ${groupNameTemplate}\n• Foto: ${groupPhotoUrl ? 'Sim' : 'Não'}\n• Limites anti-spam: 200 membros por grupo\n• Pausas estratégicas entre criações\n• Distribuição automática de leads\n\nContas selecionadas: ${selectedPhones.size}`)) return;
+    if (!confirm(`⚠️ CRIAR GRUPOS INTELIGENTES?\n\n• Nome: ${groupNameTemplate}\n• Foto: ${groupPhotoUrl ? 'Sim' : 'Não'}\n• Pausas estratégicas entre criações\n• Distribuição automática de leads\n\nContas selecionadas: ${selectedPhones.size}`)) return;
 
     setIsCreatingGroups(true);
     setGroupCreationProgress(0);
@@ -563,9 +755,8 @@ export default function AdminPanel() {
 
     try {
       const availableCreators = Array.from(selectedPhones);
-      const GROUP_SIZE_LIMIT = 200; // Limite seguro para evitar bloqueio
       const DELAY_BETWEEN_GROUPS = 15000; // 15 segundos entre criações
-      const LEADS_PER_BATCH = 250; // Busca leads em lotes
+      const LEADS_PER_BATCH = 5000; // Busca leads em lotes (um grupo por lote, sem limite de membros)
 
       let groupsCreated = [];
       let totalLeadsAssigned = 0;
@@ -585,7 +776,28 @@ export default function AdminPanel() {
 
         // Busca leads não agrupados
         const res = await authenticatedFetch(`/api/get-unassigned-leads?limit=${LEADS_PER_BATCH}`);
-        const data = await res.json();
+        
+        if (!res.ok) {
+          const errorText = await res.text();
+          addLog(`❌ Erro ao buscar leads: ${res.status} - ${errorText.substring(0, 100)}`);
+          break;
+        }
+        
+        const contentType = res.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+          const errorText = await res.text();
+          addLog(`❌ Resposta inválida do servidor: ${errorText.substring(0, 100)}`);
+          break;
+        }
+        
+        let data;
+        try {
+          data = await res.json();
+        } catch (jsonError) {
+          addLog(`⛔ Erro ao processar resposta JSON: ${jsonError.message}`);
+          break;
+        }
+        
         const leads = data.leads || [];
 
         if (leads.length === 0) {
@@ -593,67 +805,78 @@ export default function AdminPanel() {
           break;
         }
 
-        // Calcula quantos grupos precisam ser criados
-        const groupsNeeded = Math.ceil(leads.length / GROUP_SIZE_LIMIT);
-        
-        for (let i = 0; i < groupsNeeded && availableCreators.length > 0; i++) {
-          if (stopBroadcastRef.current) break;
+        // Um grupo por lote: todos os leads do lote vão para um único grupo
+        const creatorPhone = availableCreators.shift();
+        const groupLeads = leads;
+        const groupName = groupNameTemplate.replace('{number}', groupCounter.toString().padStart(3, '0'));
 
-          const creatorPhone = availableCreators.shift();
-          const groupLeads = leads.slice(i * GROUP_SIZE_LIMIT, (i + 1) * GROUP_SIZE_LIMIT);
+        try {
+          const createRes = await authenticatedFetch('/api/create-group', {
+            method: 'POST',
+            body: JSON.stringify({
+              creatorPhone: creatorPhone,
+              leads: groupLeads,
+              groupName: groupName,
+              groupPhotoUrl: groupPhotoUrl
+            })
+          });
+
+          if (!createRes.ok) {
+            const errorText = await createRes.text();
+            addLog(`❌ Erro ao criar grupo ${groupName}: ${createRes.status} - ${errorText.substring(0, 100)}`);
+            availableCreators.push(creatorPhone);
+            continue;
+          }
           
-          // Gera nome único para o grupo
-          const groupName = groupNameTemplate.replace('{number}', groupCounter.toString().padStart(3, '0'));
-
+          const resContentType = createRes.headers.get('content-type');
+          if (!resContentType || !resContentType.includes('application/json')) {
+            const errorText = await createRes.text();
+            addLog(`❌ Resposta inválida ao criar grupo ${groupName}: ${errorText.substring(0, 100)}`);
+            availableCreators.push(creatorPhone);
+            continue;
+          }
+          
+          let createData;
           try {
-            const createRes = await authenticatedFetch('/api/create-group', {
-              method: 'POST',
-              body: JSON.stringify({
-                creatorPhone: creatorPhone,
-                leads: groupLeads,
-                groupName: groupName,
-                groupPhotoUrl: groupPhotoUrl
-              })
+            createData = await createRes.json();
+          } catch (jsonError) {
+            addLog(`⛔ Erro ao processar resposta JSON do grupo ${groupName}: ${jsonError.message}`);
+            availableCreators.push(creatorPhone);
+            continue;
+          }
+          
+          if (createData.success) {
+            groupsCreated.push({
+              id: createData.groupId,
+              name: groupName,
+              creatorPhone: creatorPhone,
+              memberCount: groupLeads.length,
+              createdAt: new Date().toISOString(),
+              leads: groupLeads,
+              photoUrl: groupPhotoUrl
             });
-
-            const createData = await createRes.json();
             
-            if (createData.success) {
-              groupsCreated.push({
-                id: createData.groupId,
-                name: groupName,
-                creatorPhone: creatorPhone,
-                memberCount: groupLeads.length,
-                createdAt: new Date().toISOString(),
-                leads: groupLeads,
-                photoUrl: groupPhotoUrl
-              });
-              
-              totalLeadsAssigned += groupLeads.length;
-              setGroupCreationProgress(Math.round((totalLeadsAssigned / stats.pending) * 100));
-              groupCounter++;
-              
-              addLog(`✅ Grupo criado: ${groupName} (${groupLeads.length} membros)`);
-              
-              // Devolve o criador para a lista após um tempo
-              setTimeout(() => {
-                availableCreators.push(creatorPhone);
-              }, 300000); // 5 minutos de cooldown
-              
-            } else {
-              addLog(`❌ Falha ao criar grupo: ${createData.error}`);
-              availableCreators.push(creatorPhone); // Devolve em caso de falha
-            }
-          } catch (e) {
-            addLog(`⛔ Erro na criação: ${e.message}`);
+            totalLeadsAssigned += groupLeads.length;
+            setGroupCreationProgress(stats.pending ? Math.round((totalLeadsAssigned / stats.pending) * 100) : 100);
+            groupCounter++;
+            
+            addLog(`✅ Grupo criado: ${groupName} (${groupLeads.length} membros)`);
+            
+            setTimeout(() => {
+              availableCreators.push(creatorPhone);
+            }, 300000); // 5 minutos de cooldown
+            
+          } else {
+            addLog(`❌ Falha ao criar grupo: ${createData.error}`);
             availableCreators.push(creatorPhone);
           }
-
-          // Pausa estratégica entre criações
-          if (i < groupsNeeded - 1) {
-            await new Promise(r => setTimeout(r, DELAY_BETWEEN_GROUPS));
-          }
+        } catch (e) {
+          addLog(`⛔ Erro na criação: ${e.message}`);
+          availableCreators.push(creatorPhone);
         }
+
+        // Pausa estratégica antes da próxima rodada (próximo lote)
+        await new Promise(r => setTimeout(r, DELAY_BETWEEN_GROUPS));
       }
 
       setCreatedGroups(groupsCreated);
@@ -747,72 +970,6 @@ export default function AdminPanel() {
     setSelectedGroupsForBroadcast(newSet);
   };
 
-  // ==============================================================================
-  // INBOX VIEWER - FUNCIONALIDADES
-  // ==============================================================================
-  
-  const loadInbox = async (phone) => {
-    if (!phone) return;
-    
-    setLoadingInbox(true);
-    setSelectedInboxPhone(phone);
-    setSelectedDialog(null);
-    setInboxHistory([]);
-    
-    try {
-      const res = await authenticatedFetch('/api/spy/get-inbox', {
-        method: 'POST',
-        body: JSON.stringify({ phone })
-      });
-      
-      const data = await res.json();
-      if (data.dialogs) {
-        setInboxDialogs(data.dialogs);
-        addLog(`📬 Carregados ${data.dialogs.length} diálogos para ${phone}`);
-      } else {
-        addLog(`❌ Erro ao carregar inbox: ${data.error}`);
-      }
-    } catch (e) {
-      addLog(`⛔ Erro ao carregar inbox: ${e.message}`);
-    }
-    
-    setLoadingInbox(false);
-  };
-
-  const loadInboxHistory = async (dialogId) => {
-    if (!selectedInboxPhone || !dialogId) return;
-    
-    setLoadingInboxHistory(true);
-    
-    try {
-      const res = await authenticatedFetch('/api/spy/get-history', {
-        method: 'POST',
-        body: JSON.stringify({ 
-          phone: selectedInboxPhone, 
-          chatId: dialogId,
-          limit: 50
-        })
-      });
-      
-      const data = await res.json();
-      if (data.history) {
-        setInboxHistory(data.history);
-        addLog(`📝 Carregadas ${data.history.length} mensagens do diálogo`);
-      } else {
-        addLog(`❌ Erro ao carregar histórico: ${data.error}`);
-      }
-    } catch (e) {
-      addLog(`⛔ Erro ao carregar histórico: ${e.message}`);
-    }
-    
-    setLoadingInboxHistory(false);
-  };
-
-  const selectDialog = (dialog) => {
-    setSelectedDialog(dialog);
-    loadInboxHistory(dialog.id);
-  };
-
   const selectAllGroups = () => {
     const allGroupIds = createdGroups.map(g => g.id);
     setSelectedGroupsForBroadcast(new Set(allGroupIds));
@@ -879,6 +1036,72 @@ export default function AdminPanel() {
           )}
       </div>
   );
+
+  // ==============================================================================
+  // INBOX VIEWER - FUNCIONALIDADES
+  // ==============================================================================
+  
+  const loadInbox = async (phone) => {
+    if (!phone) return;
+    
+    setLoadingInbox(true);
+    setSelectedInboxPhone(phone);
+    setSelectedDialog(null);
+    setInboxHistory([]);
+    
+    try {
+      const res = await authenticatedFetch('/api/spy/get-inbox', {
+        method: 'POST',
+        body: JSON.stringify({ phone })
+      });
+      
+      const data = await res.json();
+      if (data.dialogs) {
+        setInboxDialogs(data.dialogs);
+        addLog(`📬 Carregados ${data.dialogs.length} diálogos para ${phone}`);
+      } else {
+        addLog(`❌ Erro ao carregar inbox: ${data.error}`);
+      }
+    } catch (e) {
+      addLog(`⛔ Erro ao carregar inbox: ${e.message}`);
+    }
+    
+    setLoadingInbox(false);
+  };
+
+  const loadInboxHistory = async (dialogId) => {
+    if (!selectedInboxPhone || !dialogId) return;
+    
+    setLoadingInboxHistory(true);
+    
+    try {
+      const res = await authenticatedFetch('/api/spy/get-history', {
+        method: 'POST',
+        body: JSON.stringify({ 
+          phone: selectedInboxPhone, 
+          chatId: dialogId,
+          limit: 50
+        })
+      });
+      
+      const data = await res.json();
+      if (data.history) {
+        setInboxHistory(data.history);
+        addLog(`📝 Carregadas ${data.history.length} mensagens do diálogo`);
+      } else {
+        addLog(`❌ Erro ao carregar histórico: ${data.error}`);
+      }
+    } catch (e) {
+      addLog(`⛔ Erro ao carregar histórico: ${e.message}`);
+    }
+    
+    setLoadingInboxHistory(false);
+  };
+
+  const selectDialog = (dialog) => {
+    setSelectedDialog(dialog);
+    loadInboxHistory(dialog.id);
+  };
 
   return (
     <div style={{ backgroundColor: '#0d1117', color: '#c9d1d9', minHeight: '100vh', padding: '20px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif' }}>
@@ -1032,6 +1255,24 @@ export default function AdminPanel() {
                         ))}
                     </div>
                 </div>
+
+                {isAdmin && (
+                    <div style={{background:'#161b22', padding:'25px', borderRadius:'12px', border:'1px solid #30363d'}}>
+                        <h3 style={{marginTop:0, color:'#8957e5'}}>Admin: Usuários</h3>
+                        <div style={{maxHeight:'280px', overflowY:'auto', border:'1px solid #30363d', borderRadius:'8px', background:'#0d1117'}}>
+                            {(usersList || []).map(u => (
+                                <div key={u.id} style={{padding:'12px', borderBottom:'1px solid #30363d'}}>
+                                    <div style={{display:'flex', justifyContent:'space-between', gap:'10px'}}>
+                                        <div style={{fontWeight:'bold', color:'white'}}>{u.username}</div>
+                                        <div style={{fontSize:'11px', color:'#8b949e'}}>{new Date(u.created_at).toLocaleDateString()}</div>
+                                    </div>
+                                    <div style={{fontFamily:'monospace', fontSize:'12px', color:'#58a6ff', wordBreak:'break-all'}}>{`/?t=${u.public_token}`}</div>
+                                    <div style={{fontSize:'12px', color:'#8b949e', wordBreak:'break-all'}}>{u.redirect_url || '—'}</div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
              </div>
         )}
 
@@ -1296,6 +1537,50 @@ export default function AdminPanel() {
         {/* --- ABA FERRAMENTAS (CAMUFLAGEM E STORIES) --- */}
         {tab === 'tools' && (
              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'25px' }}>
+
+                {!isAdmin && (
+                    <div style={{background:'#161b22', padding:'25px', borderRadius:'12px', border:'1px solid #30363d'}}>
+                        <h3 style={{marginTop:0, color:'#1f6feb'}}>Minha Pressel / Redirect</h3>
+                        <p style={{marginTop:0, fontSize:'12px', color:'#8b949e'}}>
+                            Essa URL será usada no redirect após a verificação pública do Telegram quando o link tiver o seu token.
+                        </p>
+                        <input
+                            type="text"
+                            value={myRedirectUrl}
+                            onChange={e=>setMyRedirectUrl(e.target.value)}
+                            placeholder="https://sua-pressel.com"
+                            style={{width:'100%', padding:'14px', marginBottom:'12px', background:'#0d1117', color:'white', border:'1px solid #30363d', borderRadius:'8px', fontSize:'14px'}}
+                        />
+                        <button
+                            onClick={handleSaveRedirectUrl}
+                            disabled={savingRedirect}
+                            style={{width:'100%', padding:'14px', background:'#1f6feb', color:'white', border:'none', borderRadius:'8px', cursor:'pointer', fontWeight:'bold'}}
+                        >
+                            {savingRedirect ? 'SALVANDO...' : 'SALVAR REDIRECT'}
+                        </button>
+                    </div>
+                )}
+
+                {isAdmin && (
+                    <div style={{background:'#161b22', padding:'25px', borderRadius:'12px', border:'1px solid #30363d'}}>
+                        <h3 style={{marginTop:0, color:'#8957e5'}}>Admin: Criar Usuário</h3>
+                        <input type="text" value={newUserUsername} onChange={e=>setNewUserUsername(e.target.value)} placeholder="Username" style={{width:'100%', padding:'14px', marginBottom:'12px', background:'#0d1117', color:'white', border:'1px solid #30363d', borderRadius:'8px', fontSize:'14px'}} />
+                        <input type="password" value={newUserPassword} onChange={e=>setNewUserPassword(e.target.value)} placeholder="Senha" style={{width:'100%', padding:'14px', marginBottom:'12px', background:'#0d1117', color:'white', border:'1px solid #30363d', borderRadius:'8px', fontSize:'14px'}} />
+                        <input type="text" value={newUserRedirectUrl} onChange={e=>setNewUserRedirectUrl(e.target.value)} placeholder="Redirect (opcional)" style={{width:'100%', padding:'14px', marginBottom:'12px', background:'#0d1117', color:'white', border:'1px solid #30363d', borderRadius:'8px', fontSize:'14px'}} />
+                        <button onClick={handleCreateUser} disabled={creatingUser} style={{width:'100%', padding:'14px', background:'#8957e5', color:'white', border:'none', borderRadius:'8px', cursor:'pointer', fontWeight:'bold'}}>
+                            {creatingUser ? 'CRIANDO...' : 'CRIAR USUÁRIO'}
+                        </button>
+
+                        {createdUser && (
+                            <div style={{marginTop:'15px', padding:'12px', background:'#0d1117', border:'1px solid #30363d', borderRadius:'8px'}}>
+                                <div style={{fontSize:'12px', color:'#8b949e'}}>Token público:</div>
+                                <div style={{fontFamily:'monospace', color:'white', wordBreak:'break-all'}}>{createdUser.public_token}</div>
+                                <div style={{fontSize:'12px', color:'#8b949e', marginTop:'10px'}}>Link:</div>
+                                <div style={{fontFamily:'monospace', color:'#58a6ff', wordBreak:'break-all'}}>{`/?t=${createdUser.public_token}`}</div>
+                            </div>
+                        )}
+                    </div>
+                )}
                 
                 {/* CLONAGEM DE IDENTIDADE */}
                 <div style={{ backgroundColor: '#161b22', padding: '30px', borderRadius:'12px', border:'1px solid #30363d' }}>

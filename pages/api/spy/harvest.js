@@ -10,6 +10,116 @@ const apiHash = process.env.TELEGRAM_API_HASH;
 // Limite de mensagens ao varrer histórico de canal (fallback). Reduzir se timeout.
 const CHANNEL_HISTORY_LIMIT = 400;
 
+// Busca TODOS os participantes usando paginação completa
+async function getAllParticipants(client, targetId, filter = null, chatName = '') {
+  const participants = [];
+  let offset = 0;
+  const BATCH_SIZE = 10000; // Lote seguro da API Telegram
+  const DELAY_MS = 300; // Delay entre requisições para evitar rate limiting
+  
+  try {
+    const inputPeer = await client.getInputEntity(targetId);
+    let hash = BigInt(0);
+    
+    do {
+      let result;
+      try {
+        const params = {
+          channel: inputPeer,
+          filter: filter || new Api.ChannelParticipantsRecent(),
+          offset: offset,
+          limit: BATCH_SIZE,
+          hash: hash
+        };
+        
+        result = await client.invoke(new Api.channels.GetParticipants(params));
+      } catch (apiErr) {
+        // Se falhar com filtro, tenta sem filtro
+        if (filter) {
+          try {
+            result = await client.invoke(new Api.channels.GetParticipants({
+              channel: inputPeer,
+              filter: new Api.ChannelParticipantsRecent(),
+              offset: offset,
+              limit: BATCH_SIZE,
+              hash: hash
+            }));
+          } catch (retryErr) {
+            console.warn(`[${chatName}] Erro ao buscar participantes (offset ${offset}):`, retryErr.message);
+            break; // Para a paginação em caso de erro
+          }
+        } else {
+          console.warn(`[${chatName}] Erro ao buscar participantes (offset ${offset}):`, apiErr.message);
+          break;
+        }
+      }
+      
+      if (!result) {
+        break;
+      }
+      
+      // A API retorna participantes e users separadamente
+      const batchParticipants = result.participants || [];
+      const users = result.users || [];
+      
+      // Cria um mapa de userId -> user para lookup rápido
+      const userMap = new Map();
+      for (const user of users) {
+        if (user && user.id) {
+          userMap.set(user.id.toString(), user);
+        }
+      }
+      
+      // Mapeia participantes para objetos de usuário
+      for (const participant of batchParticipants) {
+        let userId = null;
+        
+        // Diferentes tipos de participantes podem ter userId em campos diferentes
+        if (participant.userId !== undefined) {
+          userId = participant.userId.toString();
+        } else if (participant.user_id !== undefined) {
+          userId = participant.user_id.toString();
+        } else if (participant.peer && participant.peer.userId !== undefined) {
+          userId = participant.peer.userId.toString();
+        }
+        
+        if (userId) {
+          const user = userMap.get(userId);
+          if (user && !user.bot && !user.deleted) {
+            participants.push(user);
+          }
+        }
+      }
+      
+      const batchCount = batchParticipants.length;
+      offset += batchCount;
+      
+      // Atualiza hash para próxima requisição (se disponível)
+      if (result.count !== undefined) {
+        hash = BigInt(result.count);
+      }
+      
+      // Log de progresso para grupos grandes
+      if (chatName && participants.length > 0 && participants.length % 5000 === 0) {
+        console.log(`[${chatName}] Coletados ${participants.length} participantes até agora...`);
+      }
+      
+      // Delay para evitar rate limiting (apenas se ainda há mais para buscar)
+      if (batchCount === BATCH_SIZE && batchCount > 0) {
+        await new Promise(r => setTimeout(r, DELAY_MS));
+      } else {
+        break; // Não há mais participantes
+      }
+    } while (true);
+    
+  } catch (error) {
+    console.error(`[${chatName}] Erro na paginação de participantes:`, error.message);
+    // Retorna os participantes já coletados mesmo em caso de erro parcial
+  }
+  
+  return participants;
+}
+
 function buildLead(userId, username, name, originGroup, chatId, extractedBy, ownerId) {
   return {
     user_id: userId.toString(),
@@ -181,8 +291,13 @@ export default async function handler(req, res) {
       // Usa o owner_id da sessão do phone (não do usuário logado)
       const sessionOwnerId = sessionData.owner_id;
 
-    const client = new TelegramClient(new StringSession(sessionData.session_string), apiId, apiHash, { connectionRetries: 1, useWSS: false });
-    await client.connect();
+      let client = null;
+      try {
+        client = new TelegramClient(new StringSession(sessionData.session_string), apiId, apiHash, { connectionRetries: 1, useWSS: false });
+        await client.connect();
+      } catch (connError) {
+        return res.status(500).json({ error: `Erro ao conectar: ${connError.message}` });
+      }
     
     let targetId = chatId;
     let finalSource = chatName;
@@ -197,30 +312,60 @@ export default async function handler(req, res) {
             } else {
                 targetId = chatId; // Tenta extrair direto se não tiver link (pode ser supergrupo mal classificado)
             }
-        } catch (e) { targetId = chatId; }
+        } catch (e) { 
+          console.warn(`[${chatName}] Não foi possível detectar linked chat:`, e.message);
+          targetId = chatId; 
+        }
     }
 
-    // Busca Leads (Modo Aspirador)
+    // Busca Leads (Modo Aspirador) - Paginação Completa
     let participants = [];
     let leads = [];
     try {
-        const recent = await client.getParticipants(targetId, { limit: 4000, filter: new Api.ChannelParticipantsRecent() });
-        participants = recent;
+        console.log(`[${chatName}] Iniciando extração completa de participantes...`);
+        
+        // Tenta primeiro com filtro de participantes recentes
+        participants = await getAllParticipants(client, targetId, new Api.ChannelParticipantsRecent(), chatName);
+        
+        // Se retornou poucos participantes (< 100), tenta sem filtro para pegar todos
         if (participants.length < 100) {
-            participants = await client.getParticipants(targetId, { limit: 4000 });
+            console.log(`[${chatName}] Poucos participantes com filtro (${participants.length}), tentando sem filtro...`);
+            const allParticipants = await getAllParticipants(client, targetId, null, chatName);
+            if (allParticipants.length > participants.length) {
+                participants = allParticipants;
+            }
         }
+        
+        console.log(`[${chatName}] Total de participantes coletados: ${participants.length}`);
+        
     } catch (e) {
+        console.error(`[${chatName}] Erro ao buscar participantes:`, e.message);
+        
+        // Fallback: tenta extrair do histórico de mensagens (apenas para canais)
         if (isChannel) {
-            leads = await scanChannelHistory(client, chatId, chatName, `${chatName} (Histórico)`, CHANNEL_HISTORY_LIMIT, phone, sessionOwnerId);
-            if (leads.length > 0) finalSource = `${chatName} (Histórico)`;
+            try {
+              console.log(`[${chatName}] Tentando fallback: extrair do histórico de mensagens...`);
+              leads = await scanChannelHistory(client, chatId, chatName, `${chatName} (Histórico)`, CHANNEL_HISTORY_LIMIT, phone, sessionOwnerId);
+              if (leads.length > 0) {
+                  finalSource = `${chatName} (Histórico)`;
+                  console.log(`[${chatName}] Extraídos ${leads.length} leads do histórico`);
+              }
+            } catch (historyErr) {
+              console.error(`[${chatName}] Erro no fallback de histórico:`, historyErr.message);
+            }
         }
-        if (leads.length === 0) {
-            await client.disconnect();
+        
+        if (leads.length === 0 && participants.length === 0) {
+            try {
+              await client.disconnect();
+            } catch (_) {}
             return res.status(400).json({ error: "Grupo privado ou oculto (Anti-Scraping ativo)." });
         }
     }
 
-    if (leads.length === 0) {
+    // Processa participantes em leads
+    if (leads.length === 0 && participants.length > 0) {
+        console.log(`[${chatName}] Processando ${participants.length} participantes em leads...`);
         for (const p of participants) {
             if (!p.bot && !p.deleted && !p.isSelf) {
                 const name = [p.firstName, p.lastName].filter(Boolean).join(' ');
@@ -238,28 +383,49 @@ export default async function handler(req, res) {
                 });
             }
         }
+        console.log(`[${chatName}] Processados ${leads.length} leads válidos de ${participants.length} participantes`);
     }
 
+    // Salva leads no banco
     if (leads.length > 0) {
-        await supabase.from('leads_hottrack').upsert(leads, { onConflict: 'user_id', ignoreDuplicates: true });
-        
-        // --- MARCAR COMO COLHIDO ---
-        await supabase.from('harvested_sources').upsert({
-            chat_id: chatId.toString(), // Salva o ID original (do botão que vc clicou)
-            title: chatName,
-            leads_count: leads.length,
-            extracted_by: phone,
-            owner_id: sessionOwnerId, // Usa owner_id da sessão do phone
-            harvested_at: new Date()
-        }, { onConflict: 'chat_id' });
+        try {
+          await supabase.from('leads_hottrack').upsert(leads, { onConflict: 'user_id', ignoreDuplicates: true });
+          
+          // --- MARCAR COMO COLHIDO ---
+          await supabase.from('harvested_sources').upsert({
+              chat_id: chatId.toString(), // Salva o ID original (do botão que vc clicou)
+              title: chatName,
+              leads_count: leads.length,
+              extracted_by: phone,
+              owner_id: sessionOwnerId, // Usa owner_id da sessão do phone
+              harvested_at: new Date()
+          }, { onConflict: 'chat_id' });
+        } catch (dbError) {
+          console.error(`[${chatName}] Erro ao salvar no banco:`, dbError.message);
+          // Continua mesmo com erro no banco para retornar sucesso parcial
+        }
     }
 
-    await client.disconnect();
-    res.status(200).json({ success: true, count: leads.length, message: `${leads.length} leads de ${finalSource}` });
+    try {
+      await client.disconnect();
+    } catch (disconnectErr) {
+      console.warn(`[${chatName}] Erro ao desconectar cliente:`, disconnectErr.message);
+    }
+    
+    res.status(200).json({ 
+      success: true, 
+      count: leads.length, 
+      message: `${leads.length} leads extraídos de ${finalSource}` 
+    });
 
     } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: error.message });
+      console.error(`[${chatName}] Erro crítico:`, error);
+      if (client) {
+        try {
+          await client.disconnect();
+        } catch (_) {}
+      }
+      res.status(500).json({ error: error.message || 'Erro interno do servidor' });
     }
   });
 }
