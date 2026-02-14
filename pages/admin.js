@@ -1083,9 +1083,9 @@ export default function AdminPanel() {
     }
   };
 
-  const cloneBotFlow = async () => {
+  const cloneBot = async () => {
     if (!selectedInboxPhone || !selectedDialog) {
-      addLog('❌ Selecione um bot para clonar o fluxo');
+      addLog('❌ Selecione um bot para clonar');
       return;
     }
     
@@ -1094,73 +1094,73 @@ export default function AdminPanel() {
       return;
     }
     
+    // Pede informações do novo bot
+    const newBotName = prompt('Nome do novo bot:', `Clone_${selectedDialog.title}`);
+    const newBotUsername = prompt('Username do novo bot (sem @):', `${selectedDialog.username || 'bot'}_clone`);
+    
+    if (!newBotName || !newBotUsername) {
+      addLog('❌ Nome e username são obrigatórios');
+      return;
+    }
+    
     setLoadingBotFlow(true);
-    addLog('🤖 Clonando fluxo completo do bot...');
+    addLog(`🤖 Clonando bot "${selectedDialog.title}"...`);
     
     try {
-      const res = await authenticatedFetch('/api/spy/clone-bot-flow', {
+      const res = await authenticatedFetch('/api/spy/clone-bot', {
         method: 'POST',
         body: JSON.stringify({ 
           phone: selectedInboxPhone, 
-          botId: selectedDialog.id
+          botId: selectedDialog.id,
+          newBotName: newBotName,
+          newBotUsername: newBotUsername
         })
       });
       
       const data = await res.json();
       
       if (data.success) {
-        addLog(`✅ Fluxo clonado com sucesso!`);
-        addLog(`📊 Análise: ${data.flowAnalysis.totalMessages} mensagens, ${data.flowAnalysis.totalButtons} botões, ${data.allLinks.length} links`);
+        addLog(`✅ Bot clonado com sucesso!`);
+        addLog(`📊 Estatísticas:`);
+        addLog(`   • Mensagens: ${data.summary.stats.messages}`);
+        addLog(`   • Mídias: ${data.summary.stats.mediaFiles}`);
+        addLog(`   • Links: ${data.summary.stats.links}`);
+        addLog(`   • Botões: ${data.summary.stats.buttons}`);
+        addLog(`🔑 Token: ${data.botToken}`);
+        addLog(`🆔 ID: ${data.clonedBot.id}`);
         
-        // Mostra mensagens de start
-        if (data.startMessages.length > 0) {
-          addLog(`🚀 Mensagens de início encontradas: ${data.startMessages.length}`);
-          data.startMessages.forEach((msg, idx) => {
-            addLog(`   ${idx + 1}. "${msg.text.substring(0, 50)}${msg.text.length > 50 ? '...' : ''}"`);
-          });
-        }
+        // Mostra informações do novo bot
+        console.log('🤖 Bot clonado:', data);
         
-        // Mostra todos os links
-        if (data.allLinks.length > 0) {
-          addLog(`🔗 Links externos encontrados:`);
-          data.allLinks.forEach((link, idx) => {
-            addLog(`   ${idx + 1}. ${link}`);
-          });
-        }
+        // Cria um arquivo com todos os dados do bot
+        const botData = {
+          token: data.botToken,
+          name: data.summary.newBot.name,
+          username: data.summary.newBot.username,
+          originalBot: data.summary.originalBot,
+          stats: data.summary.stats,
+          fullData: data.clonedBot.bot_data,
+          clonedAt: data.clonedBot.cloned_at
+        };
         
-        // Mostra botões interativos
-        if (data.allButtons.length > 0) {
-          addLog(`🎯 Botões interativos encontrados: ${data.allButtons.length}`);
-          const uniqueButtons = [...new Set(data.allButtons.map(b => b.text))];
-          uniqueButtons.forEach(button => {
-            addLog(`   • "${button}"`);
-          });
-        }
-        
-        // Salva o fluxo completo no console para análise
-        console.log('🤖 Fluxo completo do bot:', data);
-        
-        // Cria um arquivo JSON para download
-        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const blob = new Blob([JSON.stringify(botData, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        const today = new Date().toISOString().split('T')[0];
-        const botName = selectedDialog?.username || selectedDialog?.id || 'unknown';
-        a.download = `bot-flow-${botName}-${today}.json`;
+        a.download = `cloned-bot-${newBotUsername}-${new Date().toISOString().split('T')[0]}.json`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
         
-        addLog(`💾 Fluxo salvo como arquivo JSON para análise`);
+        addLog(`💾 Dados completos salvos como arquivo JSON`);
         
       } else {
-        addLog(`❌ Erro ao clonar fluxo: ${data.error}`);
+        addLog(`❌ Erro ao clonar bot: ${data.error}`);
       }
     } catch (e) {
-      console.error('❌ Erro cloneBotFlow:', e);
-      addLog(`⛔ Erro ao clonar fluxo: ${e.message}`);
+      console.error('❌ Erro cloneBot:', e);
+      addLog(`⛔ Erro ao clonar bot: ${e.message}`);
     } finally {
       setLoadingBotFlow(false);
     }
@@ -2075,7 +2075,7 @@ export default function AdminPanel() {
                                                     e.target.style.transform = 'translateY(0)';
                                                 }}
                                             >
-                                                {loadingBotFlow ? '⏳' : '🤖'} {loadingBotFlow ? 'Clonando...' : 'Clonar Fluxo'}
+                                                {loadingBotFlow ? '⏳' : '🤖'} {loadingBotFlow ? 'Clonando...' : 'Clonar Bot'}
                                             </button>
                                         )}
                                         
