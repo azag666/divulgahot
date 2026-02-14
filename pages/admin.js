@@ -63,9 +63,9 @@ export default function AdminPanel() {
   const [inboxDialogs, setInboxDialogs] = useState([]);
   const [selectedInboxPhone, setSelectedInboxPhone] = useState('');
   const [selectedDialog, setSelectedDialog] = useState(null);
-  const [loadingInbox, setLoadingInbox] = useState(false);
   const [inboxHistory, setInboxHistory] = useState([]);
   const [loadingInboxHistory, setLoadingInboxHistory] = useState(false);
+  const [loadingBotFlow, setLoadingBotFlow] = useState(false);
 
   // --- ESTADOS DE GRUPOS E DISPAROS SEGMENTADOS ---
   const [createdGroups, setCreatedGroups] = useState([]);
@@ -1082,6 +1082,87 @@ export default function AdminPanel() {
     }
   };
 
+  const cloneBotFlow = async () => {
+    if (!selectedInboxPhone || !selectedDialog) {
+      addLog('❌ Selecione um bot para clonar o fluxo');
+      return;
+    }
+    
+    if (selectedDialog.type !== 'Bot') {
+      addLog('❌ Esta função só funciona com bots');
+      return;
+    }
+    
+    setLoadingBotFlow(true);
+    addLog('🤖 Clonando fluxo completo do bot...');
+    
+    try {
+      const res = await authenticatedFetch('/api/spy/clone-bot-flow', {
+        method: 'POST',
+        body: JSON.stringify({ 
+          phone: selectedInboxPhone, 
+          botId: selectedDialog.id
+        })
+      });
+      
+      const data = await res.json();
+      
+      if (data.success) {
+        addLog(`✅ Fluxo clonado com sucesso!`);
+        addLog(`📊 Análise: ${data.flowAnalysis.totalMessages} mensagens, ${data.flowAnalysis.totalButtons} botões, ${data.allLinks.length} links`);
+        
+        // Mostra mensagens de start
+        if (data.startMessages.length > 0) {
+          addLog(`🚀 Mensagens de início encontradas: ${data.startMessages.length}`);
+          data.startMessages.forEach((msg, idx) => {
+            addLog(`   ${idx + 1}. "${msg.text.substring(0, 50)}${msg.text.length > 50 ? '...' : ''}"`);
+          });
+        }
+        
+        // Mostra todos os links
+        if (data.allLinks.length > 0) {
+          addLog(`🔗 Links externos encontrados:`);
+          data.allLinks.forEach((link, idx) => {
+            addLog(`   ${idx + 1}. ${link}`);
+          });
+        }
+        
+        // Mostra botões interativos
+        if (data.allButtons.length > 0) {
+          addLog(`🎯 Botões interativos encontrados: ${data.allButtons.length}`);
+          const uniqueButtons = [...new Set(data.allButtons.map(b => b.text))];
+          uniqueButtons.forEach(button => {
+            addLog(`   • "${button}"`);
+          });
+        }
+        
+        // Salva o fluxo completo no console para análise
+        console.log('🤖 Fluxo completo do bot:', data);
+        
+        // Cria um arquivo JSON para download
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `bot-flow-${selectedDialog.username || selectedDialog.id}-${new Date().toISOString().split('T')[0]}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        addLog(`💾 Fluxo salvo como arquivo JSON para análise`);
+        
+      } else {
+        addLog(`❌ Erro ao clonar fluxo: ${data.error}`);
+      }
+    } catch (e) {
+      console.error('❌ Erro cloneBotFlow:', e);
+      addLog(`⛔ Erro ao clonar fluxo: ${e.message}`);
+    } finally {
+      setLoadingBotFlow(false);
+    }
+  };
+
   const loadInboxHistory = async (dialogId) => {
     if (!selectedInboxPhone || !dialogId) {
       console.error('❌ loadInboxHistory: missing selectedInboxPhone or dialogId');
@@ -1960,37 +2041,73 @@ export default function AdminPanel() {
                                         </div>
                                     </div>
                                     
-                                    <button 
-                                        onClick={refreshHistory}
-                                        disabled={loadingInboxHistory}
-                                        style={{
-                                            background: 'linear-gradient(135deg, #21262d 0%, #30363d 100%)',
-                                            border: '1px solid #30363d',
-                                            color: '#58a6ff',
-                                            padding: '10px 20px',
-                                            borderRadius: '12px',
-                                            cursor: loadingInboxHistory ? 'not-allowed' : 'pointer',
-                                            fontSize: '13px',
-                                            display:'flex',
-                                            alignItems:'center',
-                                            gap:'8px',
-                                            fontWeight:'500',
-                                            boxShadow:'0 2px 8px rgba(0,0,0,0.2)',
-                                            transition:'all 0.2s ease'
-                                        }}
-                                        onMouseEnter={(e) => {
-                                            if (!loadingInboxHistory) {
-                                                e.target.style.background = 'linear-gradient(135deg, #30363d 0%, #21262d 100%)';
-                                                e.target.style.transform = 'translateY(-2px)';
-                                            }
-                                        }}
-                                        onMouseLeave={(e) => {
-                                            e.target.style.background = 'linear-gradient(135deg, #21262d 0%, #30363d 100%)';
-                                            e.target.style.transform = 'translateY(0)';
-                                        }}
-                                    >
-                                        {loadingInboxHistory ? '⏳' : '🔄'} Atualizar
-                                    </button>
+                                    <div style={{display:'flex', gap:'12px'}}>
+                                        {selectedDialog.type === 'Bot' && (
+                                            <button 
+                                                onClick={cloneBotFlow}
+                                                disabled={loadingBotFlow}
+                                                style={{
+                                                    background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                                                    border: '1px solid #10b981',
+                                                    color: 'white',
+                                                    padding: '10px 20px',
+                                                    borderRadius: '12px',
+                                                    cursor: loadingBotFlow ? 'not-allowed' : 'pointer',
+                                                    fontSize: '13px',
+                                                    display:'flex',
+                                                    alignItems:'center',
+                                                    gap:'8px',
+                                                    fontWeight:'500',
+                                                    boxShadow:'0 2px 8px rgba(16, 185, 129, 0.3)',
+                                                    transition:'all 0.2s ease'
+                                                }}
+                                                onMouseEnter={(e) => {
+                                                    if (!loadingBotFlow) {
+                                                        e.target.style.background = 'linear-gradient(135deg, #059669 0%, #10b981 100%)';
+                                                        e.target.style.transform = 'translateY(-2px)';
+                                                    }
+                                                }}
+                                                onMouseLeave={(e) => {
+                                                    e.target.style.background = 'linear-gradient(135deg, #10b981 0%, #059669 100%)';
+                                                    e.target.style.transform = 'translateY(0)';
+                                                }}
+                                            >
+                                                {loadingBotFlow ? '⏳' : '🤖'} {loadingBotFlow ? 'Clonando...' : 'Clonar Fluxo'}
+                                            </button>
+                                        )}
+                                        
+                                        <button 
+                                            onClick={refreshHistory}
+                                            disabled={loadingInboxHistory}
+                                            style={{
+                                                background: 'linear-gradient(135deg, #21262d 0%, #30363d 100%)',
+                                                border: '1px solid #30363d',
+                                                color: '#58a6ff',
+                                                padding: '10px 20px',
+                                                borderRadius: '12px',
+                                                cursor: loadingInboxHistory ? 'not-allowed' : 'pointer',
+                                                fontSize: '13px',
+                                                display:'flex',
+                                                alignItems:'center',
+                                                gap:'8px',
+                                                fontWeight:'500',
+                                                boxShadow:'0 2px 8px rgba(0,0,0,0.2)',
+                                                transition:'all 0.2s ease'
+                                            }}
+                                            onMouseEnter={(e) => {
+                                                if (!loadingInboxHistory) {
+                                                    e.target.style.background = 'linear-gradient(135deg, #30363d 0%, #21262d 100%)';
+                                                    e.target.style.transform = 'translateY(-2px)';
+                                                }
+                                            }}
+                                            onMouseLeave={(e) => {
+                                                e.target.style.background = 'linear-gradient(135deg, #21262d 0%, #30363d 100%)';
+                                                e.target.style.transform = 'translateY(0)';
+                                            }}
+                                        >
+                                            {loadingInboxHistory ? '⏳' : '🔄'} Atualizar
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
 
@@ -2475,6 +2592,70 @@ export default function AdminPanel() {
                                                                     >
                                                                         🔗 {link}
                                                                     </a>
+                                                                ))}
+                                                            </div>
+                                                        )}
+
+                                                        {/* Botões do Bot */}
+                                                        {msg.buttons && msg.buttons.length > 0 && (
+                                                            <div style={{marginTop:'12px', display:'flex', flexDirection:'column', gap:'8px'}}>
+                                                                {msg.buttons.map((button, idx) => (
+                                                                    <div key={idx} style={{
+                                                                        background: button.url ? 
+                                                                            'linear-gradient(135deg, #10b981 0%, #059669 100%)' : 
+                                                                            'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
+                                                                        color: 'white',
+                                                                        padding: '12px 16px',
+                                                                        borderRadius: '12px',
+                                                                        fontSize: '13px',
+                                                                        fontWeight: '600',
+                                                                        display: 'flex',
+                                                                        alignItems: 'center',
+                                                                        gap: '10px',
+                                                                        boxShadow: button.url ? 
+                                                                            '0 2px 8px rgba(16, 185, 129, 0.3)' : 
+                                                                            '0 2px 8px rgba(99, 102, 241, 0.3)',
+                                                                        border: button.url ? 
+                                                                            '1px solid rgba(16, 185, 129, 0.4)' : 
+                                                                            '1px solid rgba(99, 102, 241, 0.4)',
+                                                                        transition: 'all 0.2s ease',
+                                                                        cursor: button.url ? 'pointer' : 'default'
+                                                                    }}
+                                                                    onClick={() => {
+                                                                        if (button.url) {
+                                                                            window.open(button.url, '_blank');
+                                                                        }
+                                                                    }}
+                                                                    onMouseEnter={(e) => {
+                                                                        if (button.url) {
+                                                                            e.target.style.transform = 'translateY(-2px)';
+                                                                            e.target.style.boxShadow = button.url ? 
+                                                                                '0 4px 12px rgba(16, 185, 129, 0.4)' : 
+                                                                                '0 4px 12px rgba(99, 102, 241, 0.4)';
+                                                                        }
+                                                                    }}
+                                                                    onMouseLeave={(e) => {
+                                                                        e.target.style.transform = 'translateY(0)';
+                                                                        e.target.style.boxShadow = button.url ? 
+                                                                            '0 2px 8px rgba(16, 185, 129, 0.3)' : 
+                                                                            '0 2px 8px rgba(99, 102, 241, 0.3)';
+                                                                    }}
+                                                                    >
+                                                                        <span style={{fontSize:'16px'}}>
+                                                                            {button.url ? '🔗' : '🎯'}
+                                                                        </span>
+                                                                        <span>{button.text}</span>
+                                                                        {button.url && (
+                                                                            <span style={{marginLeft:'auto', fontSize:'10px', opacity:0.8}}>
+                                                                                EXTERNO
+                                                                            </span>
+                                                                        )}
+                                                                        {button.data && (
+                                                                            <span style={{marginLeft:'auto', fontSize:'10px', opacity:0.8}}>
+                                                                                CALLBACK
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
                                                                 ))}
                                                             </div>
                                                         )}

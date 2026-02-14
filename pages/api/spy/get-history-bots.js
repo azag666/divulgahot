@@ -179,17 +179,116 @@ export default async function handler(req, res) {
       for (const m of msgs) {
         let mediaBase64 = null;
         let mediaType = null;
+        let mediaSize = 0;
+        let fileName = '';
+        let buttons = [];
         
-        // Processa mídias simples (sem timeout para bots)
-        if (m.media && m.media.photo) {
+        // Processa mídias com mais detalhes
+        if (m.media) {
           try {
-            const buffer = await client.downloadMedia(m, { workers: 1 });
-            if (buffer) {
-              mediaBase64 = `data:image/jpeg;base64,${buffer.toString('base64')}`;
-              mediaType = 'photo';
+            if (m.media.photo) {
+              // Foto normal
+              const buffer = await client.downloadMedia(m, { workers: 1 });
+              if (buffer) {
+                mediaBase64 = `data:image/jpeg;base64,${buffer.toString('base64')}`;
+                mediaType = 'photo';
+                mediaSize = buffer.length;
+                fileName = `photo_${m.id}.jpg`;
+              }
+            } else if (m.media.document) {
+              // Documento (vídeo, áudio, etc.)
+              const doc = m.media.document;
+              mediaSize = doc.size || 0;
+              
+              // Pega o nome do arquivo
+              if (doc.attributes) {
+                for (const attr of doc.attributes) {
+                  if (attr.fileName) {
+                    fileName = attr.fileName;
+                    break;
+                  }
+                }
+              }
+              
+              // Detecta tipo de mídia
+              if (doc.mimeType) {
+                if (doc.mimeType.startsWith('video/')) {
+                  mediaType = 'video';
+                  // Tenta baixar thumbnail do vídeo
+                  try {
+                    const thumbBuffer = await client.downloadMedia(m, { workers: 1 });
+                    if (thumbBuffer) {
+                      mediaBase64 = `data:image/jpeg;base64,${thumbBuffer.toString('base64')}`;
+                      mediaType = 'video_thumb';
+                    }
+                  } catch (thumbErr) {
+                    console.log('Erro ao baixar thumbnail:', thumbErr.message);
+                  }
+                } else if (doc.mimeType.startsWith('audio/')) {
+                  mediaType = doc.mimeType.includes('voice') ? 'voice' : 'audio';
+                } else if (doc.mimeType.startsWith('image/')) {
+                  mediaType = 'photo';
+                  const buffer = await client.downloadMedia(m, { workers: 1 });
+                  if (buffer) {
+                    mediaBase64 = `data:image/jpeg;base64,${buffer.toString('base64')}`;
+                  }
+                } else {
+                  mediaType = 'document';
+                }
+              }
+            } else if (m.media.webPage) {
+              // Web page preview
+              mediaType = 'webpage';
+              fileName = m.media.webPage.title || 'Web Page';
+              if (m.media.webPage.url) {
+                buttons.push({
+                  text: m.media.webPage.title || 'Abrir Link',
+                  url: m.media.webPage.url
+                });
+              }
             }
           } catch (err) {
             console.log('Erro mídia:', err.message);
+            mediaType = 'error';
+          }
+        }
+        
+        // Extrai botões da mensagem (inline buttons, reply buttons)
+        if (m.replyMarkup) {
+          try {
+            if (m.replyMarkup.rows) {
+              for (const row of m.replyMarkup.rows) {
+                if (row.buttons) {
+                  for (const button of row.buttons) {
+                    if (button.text) {
+                      const buttonInfo = {
+                        text: button.text,
+                        type: 'button'
+                      };
+                      
+                      // Extrai diferentes tipos de botão
+                      if (button.url) {
+                        buttonInfo.url = button.url;
+                        buttonInfo.type = 'url_button';
+                      } else if (button.data) {
+                        buttonInfo.data = button.data.toString('base64');
+                        buttonInfo.type = 'callback_button';
+                      } else if (button.phone) {
+                        buttonInfo.phone = button.phone;
+                        buttonInfo.type = 'phone_button';
+                      } else if (button.switchInline) {
+                        buttonInfo.switchInline = button.switchInline;
+                        buttonInfo.type = 'inline_button';
+                      }
+                      
+                      buttons.push(buttonInfo);
+                    }
+                  }
+                }
+              }
+            }
+          } catch (buttonErr) {
+            console.log('Erro ao extrair botões:', buttonErr.message);
           }
         }
         
@@ -208,6 +307,16 @@ export default async function handler(req, res) {
           }
         }
         
+        // Extrai links do texto da mensagem
+        const textLinks = [];
+        if (m.message) {
+          const urlRegex = /https?:\/\/[^\s]+/g;
+          const matches = m.message.match(urlRegex);
+          if (matches) {
+            textLinks.push(...matches);
+          }
+        }
+        
         history.push({
           id: m.id,
           text: m.message || '',
@@ -218,13 +327,17 @@ export default async function handler(req, res) {
           media: mediaBase64,
           mediaType: mediaType,
           hasMedia: !!m.media,
-          links: m.message ? (m.message.match(/https?:\/\/[^\s]+/g) || []) : [],
+          mediaSize: mediaSize,
+          fileName: fileName,
+          links: textLinks,
+          buttons: buttons,
           forwarded: m.fwdFrom ? {
             from: m.fwdFrom.fromName || 'Desconhecido',
             date: m.fwdFrom.date
           } : null,
           views: m.views || 0,
-          isPinned: m.pinned || false
+          isPinned: m.pinned || false,
+          edits: m.editDate ? 1 : 0
         });
       }
       
