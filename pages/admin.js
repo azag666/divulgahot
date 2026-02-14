@@ -1144,7 +1144,9 @@ export default function AdminPanel() {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `bot-flow-${selectedDialog.username || selectedDialog.id}-${new Date().toISOString().split('T')[0]}.json`;
+        const today = new Date().toISOString().split('T')[0];
+        const botName = selectedDialog?.username || selectedDialog?.id || 'unknown';
+        a.download = `bot-flow-${botName}-${today}.json`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -2042,7 +2044,7 @@ export default function AdminPanel() {
                                     </div>
                                     
                                     <div style={{display:'flex', gap:'12px'}}>
-                                        {selectedDialog.type === 'Bot' && (
+                                        {selectedDialog && selectedDialog.type === 'Bot' && (
                                             <button 
                                                 onClick={cloneBotFlow}
                                                 disabled={loadingBotFlow}
