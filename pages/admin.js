@@ -2047,7 +2047,7 @@ export default function AdminPanel() {
                                     <div style={{display:'flex', gap:'12px'}}>
                                         {selectedDialog && selectedDialog.type === 'Bot' && (
                                             <button 
-                                                onClick={cloneBotFlow}
+                                                onClick={cloneBot}
                                                 disabled={loadingBotFlow}
                                                 style={{
                                                     background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
