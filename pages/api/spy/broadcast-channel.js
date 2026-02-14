@@ -1,4 +1,4 @@
-import { TelegramClient } from "telegram";
+import { TelegramClient, Api } from "telegram";
 import { StringSession } from "telegram/sessions";
 import { createClient } from '@supabase/supabase-js';
 const { authenticate } = require('../../../lib/middleware');
