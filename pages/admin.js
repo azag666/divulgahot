@@ -1994,193 +1994,513 @@ export default function AdminPanel() {
                                 </div>
                             </div>
 
-                            <div style={{flex:1, overflowY:'auto', marginBottom:'15px', paddingRight:'10px'}}>
+                            <div style={{flex:1, overflowY:'auto', padding:'24px', background: 'linear-gradient(180deg, #0d1117 0%, #161b22 100%)'}}>
                                 {loadingInboxHistory ? (
-                                    <div style={{textAlign:'center', padding:'60px', color:'#8b949e'}}>
-                                        <div style={{fontSize:'32px', marginBottom:'15px'}}>⏳</div>
-                                        <div>Carregando mensagens...</div>
+                                    <div style={{textAlign:'center', padding:'120px 20px', color:'#8b949e'}}>
+                                        <div style={{fontSize:'64px', marginBottom:'24px', animation: 'pulse 2s infinite'}}>⏳</div>
+                                        <div style={{fontSize:'18px', marginBottom:'12px', fontWeight:'500'}}>Carregando conversa...</div>
+                                        <div style={{fontSize:'13px', opacity:0.7}}>Isso pode levar alguns segundos</div>
                                     </div>
                                 ) : inboxHistory.length === 0 ? (
-                                    <div style={{textAlign:'center', padding:'60px', color:'#8b949e', fontSize:'14px'}}>
-                                        <div style={{fontSize:'48px', marginBottom:'15px'}}>💬</div>
-                                        <div>Nenhuma mensagem encontrada neste diálogo</div>
+                                    <div style={{textAlign:'center', padding:'120px 20px', color:'#8b949e'}}>
+                                        <div style={{fontSize:'96px', marginBottom:'24px', opacity:0.6}}>💬</div>
+                                        <div style={{fontSize:'20px', marginBottom:'12px', fontWeight:'500'}}>Nenhuma mensagem encontrada</div>
+                                        <div style={{fontSize:'14px', opacity:0.7, maxWidth:'400px', margin:'0 auto', lineHeight:'1.6'}}>
+                                            Este diálogo não possui mensagens ou elas não podem ser carregadas no momento
+                                        </div>
                                     </div>
                                 ) : (
-                                    <div style={{display:'flex', flexDirection:'column', gap:'12px'}}>
-                                        {inboxHistory.map((msg, index) => (
-                                            <div key={msg.id} style={{
-                                                display:'flex',
-                                                justifyContent: msg.isOut ? 'flex-end' : 'flex-start',
-                                                marginBottom:'8px',
-                                                animation: 'fadeIn 0.3s ease-in'
-                                            }}>
-                                                <div style={{
-                                                    maxWidth:'75%',
-                                                    padding:'12px 16px',
-                                                    borderRadius:'18px',
-                                                    background: msg.isOut ? '#e34234' : '#0d1117',
-                                                    border: '1px solid #30363d',
-                                                    color: 'white',
-                                                    wordBreak:'break-word',
-                                                    position: 'relative'
-                                                }}>
-                                                    {/* Cabeçalho da mensagem */}
-                                                    <div style={{fontSize:'11px', color:'#8b949e', marginBottom:'6px', display:'flex', justifyContent:'space-between', alignItems:'center'}}>
-                                                        <span style={{fontWeight:'bold'}}>{msg.sender}</span>
-                                                        <span>{formatMessageTime(msg.date)}</span>
-                                                    </div>
-
-                                                    {/* Indicadores especiais */}
-                                                    <div style={{display:'flex', gap:'5px', marginBottom:'6px', flexWrap:'wrap'}}>
-                                                        {msg.isPinned && <span style={{background:'#f0abfc', color:'#8957e5', padding:'2px 6px', borderRadius:'4px', fontSize:'10px'}}>📌 Fixado</span>}
-                                                        {msg.forwarded && <span style={{background:'#c9d1d9', color:'#24292f', padding:'2px 6px', borderRadius:'4px', fontSize:'10px'}}>↪️ Encaminhado</span>}
-                                                        {msg.edits && <span style={{background:'#ffd93d', color:'#24292f', padding:'2px 6px', borderRadius:'4px', fontSize:'10px'}}>✏️ Editada</span>}
-                                                        {msg.views > 0 && <span style={{background:'#58a6ff', color:'white', padding:'2px 6px', borderRadius:'4px', fontSize:'10px'}}>👁️ {msg.views}</span>}
-                                                    </div>
-
-                                                    {/* Texto da mensagem */}
-                                                    {msg.text && (
-                                                        <div style={{marginBottom:'8px', lineHeight:'1.5', fontSize:'14px'}}>
-                                                            {msg.text}
+                                    <div style={{display:'flex', flexDirection:'column', gap:'20px', maxWidth:'800px', margin:'0 auto'}}>
+                                        {/* Separadores de data */}
+                                        {inboxHistory.map((msg, index) => {
+                                            const prevMsg = inboxHistory[index - 1];
+                                            const showDateSeparator = !prevMsg || 
+                                                new Date(msg.date).toDateString() !== new Date(prevMsg.date).toDateString();
+                                            
+                                            const isToday = new Date(msg.date).toDateString() === new Date().toDateString();
+                                            const isYesterday = new Date(msg.date).toDateString() === new Date(Date.now() - 86400000).toDateString();
+                                            
+                                            return (
+                                                <div key={msg.id}>
+                                                    {showDateSeparator && (
+                                                        <div style={{textAlign:'center', margin:'32px 0'}}>
+                                                            <div style={{
+                                                                background: 'linear-gradient(135deg, #30363d 0%, #21262d 100%)',
+                                                                color: '#8b949e',
+                                                                padding: '8px 20px',
+                                                                borderRadius: '24px',
+                                                                fontSize: '13px',
+                                                                fontWeight:'600',
+                                                                display: 'inline-block',
+                                                                boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+                                                                border: '1px solid #30363d'
+                                                            }}>
+                                                                {isToday ? 'Hoje' : isYesterday ? 'Ontem' : new Date(msg.date).toLocaleDateString('pt-BR', {
+                                                                    weekday: 'long',
+                                                                    day: 'numeric',
+                                                                    month: 'long'
+                                                                })}
+                                                            </div>
                                                         </div>
                                                     )}
+                                                    
+                                                    <div style={{
+                                                        display:'flex',
+                                                        justifyContent: msg.isOut ? 'flex-end' : 'flex-start',
+                                                        marginBottom:'8px',
+                                                        animation: 'fadeInUp 0.3s ease-out'
+                                                    }}>
+                                                        <div style={{
+                                                            maxWidth:'75%',
+                                                            minWidth:'280px',
+                                                            padding:'16px 20px',
+                                                            borderRadius: msg.isOut ? '24px 24px 8px 24px' : '24px 24px 24px 8px',
+                                                            background: msg.isOut ? 
+                                                                'linear-gradient(135deg, #e34234 0%, #d63638 100%)' : 
+                                                                'linear-gradient(135deg, #21262d 0%, #30363d 100%)',
+                                                            border: msg.isOut ? '1px solid rgba(227, 66, 52, 0.3)' : '1px solid #30363d',
+                                                            color: 'white',
+                                                            wordBreak:'break-word',
+                                                            position: 'relative',
+                                                            boxShadow: msg.isOut ? 
+                                                                '0 4px 16px rgba(227, 66, 52, 0.25)' : 
+                                                                '0 4px 16px rgba(0, 0, 0, 0.15)',
+                                                            transition: 'all 0.2s ease',
+                                                            backdropFilter: 'blur(10px)'
+                                                        }}
+                                                        onMouseEnter={(e) => {
+                                                            e.target.style.transform = 'scale(1.01)';
+                                                            e.target.style.boxShadow = msg.isOut ? 
+                                                                '0 6px 20px rgba(227, 66, 52, 0.35)' : 
+                                                                '0 6px 20px rgba(0, 0, 0, 0.25)';
+                                                        }}
+                                                        onMouseLeave={(e) => {
+                                                            e.target.style.transform = 'scale(1)';
+                                                            e.target.style.boxShadow = msg.isOut ? 
+                                                                '0 4px 16px rgba(227, 66, 52, 0.25)' : 
+                                                                '0 4px 16px rgba(0, 0, 0, 0.15)';
+                                                        }}
+                                                    >
+                                                        {/* Cabeçalho da mensagem */}
+                                                        <div style={{
+                                                            fontSize:'11px', 
+                                                            color: msg.isOut ? 'rgba(255,255,255,0.7)' : 'rgba(139,148,158,0.9)', 
+                                                            marginBottom:'10px', 
+                                                            display:'flex', 
+                                                            justifyContent:'space-between', 
+                                                            alignItems:'center',
+                                                            fontWeight:'500',
+                                                            letterSpacing:'0.3px'
+                                                        }}>
+                                                            <span style={{
+                                                                background: msg.isOut ? 'rgba(255,255,255,0.1)' : 'rgba(139,148,158,0.2)',
+                                                                padding: '3px 8px',
+                                                                borderRadius: '12px',
+                                                                fontSize: '10px'
+                                                            }}>
+                                                                {msg.sender}
+                                                            </span>
+                                                            <span>{formatMessageTime(msg.date)}</span>
+                                                        </div>
 
-                                                    {/* Mídia */}
-                                                    {msg.media && (
-                                                        <div style={{marginBottom:'8px'}}>
-                                                            {msg.mediaType === 'photo' && (
-                                                                <img 
-                                                                    src={msg.media} 
-                                                                    alt="Foto" 
-                                                                    style={{maxWidth:'100%', borderRadius:'8px', cursor:'pointer'}}
-                                                                    onClick={() => window.open(msg.media, '_blank')}
-                                                                />
+                                                        {/* Indicadores especiais */}
+                                                        <div style={{display:'flex', gap:'6px', marginBottom:'10px', flexWrap:'wrap'}}>
+                                                            {msg.isPinned && (
+                                                                <span style={{
+                                                                    background:'linear-gradient(135deg, #f0abfc 0%, #d946ef 100%)', 
+                                                                    color:'white', 
+                                                                    padding:'4px 10px', 
+                                                                    borderRadius:'14px', 
+                                                                    fontSize:'10px', 
+                                                                    fontWeight:'bold',
+                                                                    boxShadow: '0 2px 6px rgba(217, 70, 239, 0.3)'
+                                                                }}>
+                                                                    📌 Fixado
+                                                                </span>
                                                             )}
-                                                            {msg.mediaType === 'video_thumb' && (
-                                                                <div style={{position:'relative', display:'inline-block'}}>
-                                                                    <img 
-                                                                        src={msg.media} 
-                                                                        alt="Vídeo" 
-                                                                        style={{maxWidth:'100%', borderRadius:'8px', cursor:'pointer'}}
-                                                                        onClick={() => window.open(msg.media, '_blank')}
-                                                                    />
+                                                            {msg.forwarded && (
+                                                                <span style={{
+                                                                    background:'linear-gradient(135deg, #c9d1d9 0%, #8b949e 100%)', 
+                                                                    color:'white', 
+                                                                    padding:'4px 10px', 
+                                                                    borderRadius:'14px', 
+                                                                    fontSize:'10px', 
+                                                                    fontWeight:'bold',
+                                                                    boxShadow: '0 2px 6px rgba(139, 148, 158, 0.3)'
+                                                                }}>
+                                                                    ↪️ Encaminhado
+                                                                </span>
+                                                            )}
+                                                            {msg.edits && (
+                                                                <span style={{
+                                                                    background:'linear-gradient(135deg, #ffd93d 0%, #f59e0b 100%)', 
+                                                                    color:'white', 
+                                                                    padding:'4px 10px', 
+                                                                    borderRadius:'14px', 
+                                                                    fontSize:'10px', 
+                                                                    fontWeight:'bold',
+                                                                    boxShadow: '0 2px 6px rgba(245, 158, 11, 0.3)'
+                                                                }}>
+                                                                    ✏️ Editada
+                                                                </span>
+                                                            )}
+                                                            {msg.views > 0 && (
+                                                                <span style={{
+                                                                    background:'linear-gradient(135deg, #58a6ff 0%, #1e40af 100%)', 
+                                                                    color:'white', 
+                                                                    padding:'4px 10px', 
+                                                                    borderRadius:'14px', 
+                                                                    fontSize:'10px', 
+                                                                    fontWeight:'bold',
+                                                                    boxShadow: '0 2px 6px rgba(88, 166, 255, 0.3)'
+                                                                }}>
+                                                                    👁️ {msg.views}
+                                                                </span>
+                                                            )}
+                                                        </div>
+
+                                                        {/* Texto da mensagem */}
+                                                        {msg.text && (
+                                                            <div style={{
+                                                                marginBottom:'12px', 
+                                                                lineHeight:'1.7', 
+                                                                fontSize:'15px',
+                                                                whiteSpace:'pre-wrap',
+                                                                wordBreak:'break-word'
+                                                            }}>
+                                                                {msg.text}
+                                                            </div>
+                                                        )}
+
+                                                        {/* Mídia */}
+                                                        {msg.media && (
+                                                            <div style={{marginBottom:'12px'}}>
+                                                                {msg.mediaType === 'photo' && (
+                                                                    <div style={{position:'relative', display:'inline-block', borderRadius:'16px', overflow:'hidden'}}>
+                                                                        <img 
+                                                                            src={msg.media} 
+                                                                            alt="Foto" 
+                                                                            style={{maxWidth:'100%', display:'block', cursor:'pointer'}}
+                                                                            onClick={() => window.open(msg.media, '_blank')}
+                                                                        />
+                                                                        <div style={{
+                                                                            position:'absolute',
+                                                                            bottom:'12px',
+                                                                            right:'12px',
+                                                                            background:'rgba(0,0,0,0.8)',
+                                                                            color:'white',
+                                                                            padding:'6px 12px',
+                                                                            borderRadius:'12px',
+                                                                            fontSize:'11px',
+                                                                            fontWeight:'500',
+                                                                            backdropFilter: 'blur(10px)'
+                                                                        }}>
+                                                                            📷 Foto
+                                                                        </div>
+                                                                    </div>
+                                                                )}
+                                                                {msg.mediaType === 'video_thumb' && (
+                                                                    <div style={{position:'relative', display:'inline-block', borderRadius:'16px', overflow:'hidden'}}>
+                                                                        <img 
+                                                                            src={msg.media} 
+                                                                            alt="Vídeo" 
+                                                                            style={{maxWidth:'100%', display:'block', cursor:'pointer'}}
+                                                                            onClick={() => window.open(msg.media, '_blank')}
+                                                                        />
+                                                                        <div style={{
+                                                                            position:'absolute',
+                                                                            top:'50%',
+                                                                            left:'50%',
+                                                                            transform:'translate(-50%, -50%)',
+                                                                            background:'rgba(0,0,0,0.9)',
+                                                                            color:'white',
+                                                                            borderRadius:'50%',
+                                                                            width:'56px',
+                                                                            height:'56px',
+                                                                            display:'flex',
+                                                                            alignItems:'center',
+                                                                            justifyContent:'center',
+                                                                            fontSize:'24px',
+                                                                            cursor:'pointer',
+                                                                            backdropFilter: 'blur(10px)',
+                                                                            boxShadow: '0 4px 16px rgba(0,0,0,0.4)'
+                                                                        }}>
+                                                                            ▶️
+                                                                        </div>
+                                                                        <div style={{
+                                                                            position:'absolute',
+                                                                            bottom:'12px',
+                                                                            right:'12px',
+                                                                            background:'rgba(0,0,0,0.8)',
+                                                                            color:'white',
+                                                                            padding:'6px 12px',
+                                                                            borderRadius:'12px',
+                                                                            fontSize:'11px',
+                                                                            fontWeight:'500',
+                                                                            backdropFilter: 'blur(10px)'
+                                                                        }}>
+                                                                            🎥 Vídeo
+                                                                        </div>
+                                                                    </div>
+                                                                )}
+                                                                {msg.mediaType === 'document' && (
                                                                     <div style={{
-                                                                        position:'absolute',
-                                                                        top:'50%',
-                                                                        left:'50%',
-                                                                        transform:'translate(-50%, -50%)',
-                                                                        background:'rgba(0,0,0,0.7)',
-                                                                        color:'white',
-                                                                        borderRadius:'50%',
-                                                                        width:'40px',
-                                                                        height:'40px',
-                                                                        display:'flex',
-                                                                        alignItems:'center',
-                                                                        justifyContent:'center',
-                                                                        fontSize:'16px'
+                                                                        padding:'16px', 
+                                                                        background:'rgba(33,38,45,0.9)', 
+                                                                        borderRadius:'16px', 
+                                                                        fontSize:'13px', 
+                                                                        display:'flex', 
+                                                                        alignItems:'center', 
+                                                                        gap:'16px', 
+                                                                        border:'1px solid #30363d',
+                                                                        backdropFilter: 'blur(10px)'
                                                                     }}>
-                                                                        ▶️
+                                                                        <div style={{
+                                                                            width:'48px',
+                                                                            height:'48px',
+                                                                            background:'linear-gradient(135deg, #58a6ff 0%, #1e40af 100%)',
+                                                                            borderRadius:'12px',
+                                                                            display:'flex',
+                                                                            alignItems:'center',
+                                                                            justifyContent:'center',
+                                                                            fontSize:'24px'
+                                                                        }}>
+                                                                            📎
+                                                                        </div>
+                                                                        <div style={{flex:1}}>
+                                                                            <div style={{fontWeight:'600', marginBottom:'6px', fontSize:'14px'}}>{msg.fileName}</div>
+                                                                            {msg.mediaSize > 0 && (
+                                                                                <div style={{color:'#8b949e', fontSize:'11px'}}>
+                                                                                    {formatFileSize(msg.mediaSize)}
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
                                                                     </div>
-                                                                </div>
-                                                            )}
-                                                            {msg.mediaType === 'document' && (
-                                                                <div style={{padding:'12px', background:'#21262d', borderRadius:'8px', fontSize:'12px', display:'flex', alignItems:'center', gap:'10px'}}>
-                                                                    <span style={{fontSize:'20px'}}>📎</span>
-                                                                    <div style={{flex:1}}>
-                                                                        <div style={{fontWeight:'bold'}}>{msg.fileName}</div>
-                                                                        {msg.mediaSize > 0 && (
-                                                                            <div style={{color:'#8b949e', fontSize:'10px'}}>
-                                                                                {formatFileSize(msg.mediaSize)}
-                                                                            </div>
-                                                                        )}
+                                                                )}
+                                                                {msg.mediaType === 'audio' && (
+                                                                    <div style={{
+                                                                        padding:'16px', 
+                                                                        background:'rgba(33,38,45,0.9)', 
+                                                                        borderRadius:'16px', 
+                                                                        fontSize:'13px', 
+                                                                        display:'flex', 
+                                                                        alignItems:'center', 
+                                                                        gap:'16px', 
+                                                                        border:'1px solid #30363d',
+                                                                        backdropFilter: 'blur(10px)'
+                                                                    }}>
+                                                                        <div style={{
+                                                                            width:'48px',
+                                                                            height:'48px',
+                                                                            background:'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                                                                            borderRadius:'12px',
+                                                                            display:'flex',
+                                                                            alignItems:'center',
+                                                                            justifyContent:'center',
+                                                                            fontSize:'24px'
+                                                                        }}>
+                                                                            🎵
+                                                                        </div>
+                                                                        <div style={{flex:1}}>
+                                                                            <div style={{fontWeight:'600', marginBottom:'6px', fontSize:'14px'}}>{msg.fileName}</div>
+                                                                            {msg.mediaSize > 0 && (
+                                                                                <div style={{color:'#8b949e', fontSize:'11px'}}>
+                                                                                    {formatFileSize(msg.mediaSize)}
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
                                                                     </div>
-                                                                </div>
-                                                            )}
-                                                            {msg.mediaType === 'audio' && (
-                                                                <div style={{padding:'12px', background:'#21262d', borderRadius:'8px', fontSize:'12px', display:'flex', alignItems:'center', gap:'10px'}}>
-                                                                    <span style={{fontSize:'20px'}}>🎵</span>
-                                                                    <div style={{flex:1}}>
-                                                                        <div style={{fontWeight:'bold'}}>{msg.fileName}</div>
-                                                                        {msg.mediaSize > 0 && (
-                                                                            <div style={{color:'#8b949e', fontSize:'10px'}}>
-                                                                                {formatFileSize(msg.mediaSize)}
-                                                                            </div>
-                                                                        )}
+                                                                )}
+                                                                {msg.mediaType === 'voice' && (
+                                                                    <div style={{
+                                                                        padding:'16px', 
+                                                                        background:'rgba(33,38,45,0.9)', 
+                                                                        borderRadius:'16px', 
+                                                                        fontSize:'13px', 
+                                                                        display:'flex', 
+                                                                        alignItems:'center', 
+                                                                        gap:'16px', 
+                                                                        border:'1px solid #30363d',
+                                                                        backdropFilter: 'blur(10px)'
+                                                                    }}>
+                                                                        <div style={{
+                                                                            width:'48px',
+                                                                            height:'48px',
+                                                                            background:'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)',
+                                                                            borderRadius:'12px',
+                                                                            display:'flex',
+                                                                            alignItems:'center',
+                                                                            justifyContent:'center',
+                                                                            fontSize:'24px'
+                                                                        }}>
+                                                                            🎤
+                                                                        </div>
+                                                                        <div style={{flex:1}}>
+                                                                            <div style={{fontWeight:'600', marginBottom:'6px', fontSize:'14px'}}>Áudio de voz</div>
+                                                                            {msg.mediaSize > 0 && (
+                                                                                <div style={{color:'#8b949e', fontSize:'11px'}}>
+                                                                                    {formatFileSize(msg.mediaSize)}
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
                                                                     </div>
-                                                                </div>
-                                                            )}
-                                                            {msg.mediaType === 'voice' && (
-                                                                <div style={{padding:'12px', background:'#21262d', borderRadius:'8px', fontSize:'12px', display:'flex', alignItems:'center', gap:'10px'}}>
-                                                                    <span style={{fontSize:'20px'}}>🎤</span>
-                                                                    <div style={{flex:1}}>
-                                                                        <div style={{fontWeight:'bold'}}>Áudio de voz</div>
-                                                                        {msg.mediaSize > 0 && (
-                                                                            <div style={{color:'#8b949e', fontSize:'10px'}}>
-                                                                                {formatFileSize(msg.mediaSize)}
-                                                                            </div>
-                                                                        )}
+                                                                )}
+                                                                {msg.mediaType === 'sticker' && (
+                                                                    <div style={{
+                                                                        padding:'20px', 
+                                                                        background:'rgba(33,38,45,0.9)', 
+                                                                        borderRadius:'16px', 
+                                                                        fontSize:'14px', 
+                                                                        textAlign:'center', 
+                                                                        border:'1px solid #30363d',
+                                                                        backdropFilter: 'blur(10px)'
+                                                                    }}>
+                                                                        <div style={{fontSize:'48px', marginBottom:'8px'}}>😀</div>
+                                                                        <div style={{fontWeight:'500'}}>Sticker</div>
                                                                     </div>
-                                                                </div>
-                                                            )}
-                                                            {msg.mediaType === 'sticker' && (
-                                                                <div style={{padding:'8px', background:'#21262d', borderRadius:'8px', fontSize:'12px', textAlign:'center'}}>
-                                                                    😀 Sticker: {msg.fileName}
-                                                                </div>
-                                                            )}
-                                                            {msg.mediaType === 'contact' && (
-                                                                <div style={{padding:'12px', background:'#21262d', borderRadius:'8px', fontSize:'12px', display:'flex', alignItems:'center', gap:'10px'}}>
-                                                                    <span style={{fontSize:'20px'}}>👤</span>
-                                                                    <div>{msg.fileName}</div>
-                                                                </div>
-                                                            )}
-                                                            {msg.mediaType === 'location' && (
-                                                                <div style={{padding:'12px', background:'#21262d', borderRadius:'8px', fontSize:'12px', display:'flex', alignItems:'center', gap:'10px'}}>
-                                                                    <span style={{fontSize:'20px'}}>📍</span>
-                                                                    <div>{msg.fileName}</div>
-                                                                </div>
-                                                            )}
-                                                            {msg.mediaType === 'error' && (
-                                                                <div style={{padding:'8px', background:'#f85149', borderRadius:'6px', fontSize:'11px', textAlign:'center'}}>
-                                                                    ❌ Erro ao carregar mídia
-                                                                </div>
-                                                            )}
-                                                            {msg.mediaType === 'timeout' && (
-                                                                <div style={{padding:'8px', background:'#d29922', borderRadius:'6px', fontSize:'11px', textAlign:'center'}}>
-                                                                    ⏱️ Timeout ao carregar mídia
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                    )}
+                                                                )}
+                                                                {msg.mediaType === 'contact' && (
+                                                                    <div style={{
+                                                                        padding:'16px', 
+                                                                        background:'rgba(33,38,45,0.9)', 
+                                                                        borderRadius:'16px', 
+                                                                        fontSize:'13px', 
+                                                                        display:'flex', 
+                                                                        alignItems:'center', 
+                                                                        gap:'16px', 
+                                                                        border:'1px solid #30363d',
+                                                                        backdropFilter: 'blur(10px)'
+                                                                    }}>
+                                                                        <div style={{
+                                                                            width:'48px',
+                                                                            height:'48px',
+                                                                            background:'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+                                                                            borderRadius:'12px',
+                                                                            display:'flex',
+                                                                            alignItems:'center',
+                                                                            justifyContent:'center',
+                                                                            fontSize:'24px'
+                                                                        }}>
+                                                                            👤
+                                                                        </div>
+                                                                        <div style={{flex:1, fontSize:'14px', fontWeight:'500'}}>{msg.fileName}</div>
+                                                                    </div>
+                                                                )}
+                                                                {msg.mediaType === 'location' && (
+                                                                    <div style={{
+                                                                        padding:'16px', 
+                                                                        background:'rgba(33,38,45,0.9)', 
+                                                                        borderRadius:'16px', 
+                                                                        fontSize:'13px', 
+                                                                        display:'flex', 
+                                                                        alignItems:'center', 
+                                                                        gap:'16px', 
+                                                                        border:'1px solid #30363d',
+                                                                        backdropFilter: 'blur(10px)'
+                                                                    }}>
+                                                                        <div style={{
+                                                                            width:'48px',
+                                                                            height:'48px',
+                                                                            background:'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+                                                                            borderRadius:'12px',
+                                                                            display:'flex',
+                                                                            alignItems:'center',
+                                                                            justifyContent:'center',
+                                                                            fontSize:'24px'
+                                                                        }}>
+                                                                            📍
+                                                                        </div>
+                                                                        <div style={{flex:1, fontSize:'14px', fontWeight:'500'}}>{msg.fileName}</div>
+                                                                    </div>
+                                                                )}
+                                                                {msg.mediaType === 'error' && (
+                                                                    <div style={{
+                                                                        padding:'16px', 
+                                                                        background:'rgba(239,68,68,0.2)', 
+                                                                        borderRadius:'12px', 
+                                                                        fontSize:'12px', 
+                                                                        textAlign:'center', 
+                                                                        border:'1px solid #ef4444',
+                                                                        color: '#ef4444'
+                                                                    }}>
+                                                                        ❌ Erro ao carregar mídia
+                                                                    </div>
+                                                                )}
+                                                                {msg.mediaType === 'timeout' && (
+                                                                    <div style={{
+                                                                        padding:'16px', 
+                                                                        background:'rgba(245,158,11,0.2)', 
+                                                                        borderRadius:'12px', 
+                                                                        fontSize:'12px', 
+                                                                        textAlign:'center', 
+                                                                        border:'1px solid #f59e0b',
+                                                                        color: '#f59e0b'
+                                                                    }}>
+                                                                        ⏱️ Timeout ao carregar mídia
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        )}
 
-                                                    {/* Links */}
-                                                    {msg.links && msg.links.length > 0 && (
-                                                        <div style={{marginTop:'8px'}}>
-                                                            {msg.links.map((link, idx) => (
-                                                                <a 
-                                                                    key={idx}
-                                                                    href={link} 
-                                                                    target="_blank" 
-                                                                    rel="noopener noreferrer"
-                                                                    style={{color:'#58a6ff', textDecoration:'none', fontSize:'12px', display:'block', wordBreak:'break-all', marginBottom:'4px'}}
-                                                                >
-                                                                    🔗 {link}
-                                                                </a>
-                                                            ))}
-                                                        </div>
-                                                    )}
+                                                        {/* Links */}
+                                                        {msg.links && msg.links.length > 0 && (
+                                                            <div style={{marginTop:'12px'}}>
+                                                                {msg.links.map((link, idx) => (
+                                                                    <a 
+                                                                        key={idx}
+                                                                        href={link} 
+                                                                        target="_blank" 
+                                                                        rel="noopener noreferrer"
+                                                                        style={{
+                                                                            color:'#58a6ff', 
+                                                                            textDecoration:'none', 
+                                                                            fontSize:'13px', 
+                                                                            display:'block', 
+                                                                            wordBreak:'break-all', 
+                                                                            marginBottom:'8px', 
+                                                                            padding:'12px 16px',
+                                                                            background:'rgba(88,166,255,0.15)', 
+                                                                            borderRadius:'12px', 
+                                                                            border:'1px solid rgba(88,166,255,0.3)',
+                                                                            transition:'all 0.2s ease'
+                                                                        }}
+                                                                        onMouseEnter={(e) => {
+                                                                            e.target.style.background = 'rgba(88,166,255,0.25)';
+                                                                            e.target.style.transform = 'translateX(4px)';
+                                                                        }}
+                                                                        onMouseLeave={(e) => {
+                                                                            e.target.style.background = 'rgba(88,166,255,0.15)';
+                                                                            e.target.style.transform = 'translateX(0)';
+                                                                        }}
+                                                                    >
+                                                                        🔗 {link}
+                                                                    </a>
+                                                                ))}
+                                                            </div>
+                                                        )}
 
-                                                    {/* Informações de encaminhamento */}
-                                                    {msg.forwarded && (
-                                                        <div style={{fontSize:'10px', color:'#8b949e', fontStyle:'italic', marginTop:'6px', borderTop:'1px solid #30363d', paddingTop:'6px'}}>
-                                                            ↪️ Encaminhado de {msg.forwarded.from}
-                                                            {msg.forwarded.date && (
-                                                                <span> • {formatMessageTime(msg.forwarded.date)}</span>
-                                                            )}
-                                                        </div>
-                                                    )}
+                                                        {/* Informações de encaminhamento */}
+                                                        {msg.forwarded && (
+                                                            <div style={{
+                                                                fontSize:'10px', 
+                                                                color:'rgba(139,148,158,0.8)', 
+                                                                fontStyle:'italic', 
+                                                                marginTop:'12px', 
+                                                                borderTop:'1px solid rgba(139,148,158,0.2)', 
+                                                                paddingTop:'12px', 
+                                                                lineHeight:'1.5'
+                                                            }}>
+                                                                ↪️ Encaminhado de {msg.forwarded.from}
+                                                                {msg.forwarded.date && (
+                                                                    <span> • {formatMessageTime(msg.forwarded.date)}</span>
+                                                                )}
+                                                            </div>
+                                                        )}
+                                                    </div>
                                                 </div>
                                             </div>
-                                        ))}
+                                        );
+                                    })}
                                     </div>
                                 )}
                             </div>
