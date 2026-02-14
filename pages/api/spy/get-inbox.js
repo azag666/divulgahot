@@ -42,8 +42,8 @@ export default async function handler(req, res) {
           throw connErr;
       }
 
-      // Pega os últimos 50 diálogos (todos os tipos)
-      const dialogs = await client.getDialogs({ limit: 50 });
+      // Pega os últimos 30 diálogos para melhor performance
+      const dialogs = await client.getDialogs({ limit: 30 });
       
       const inboxDialogs = [];
 
@@ -54,10 +54,15 @@ export default async function handler(req, res) {
         let title = 'Diálogo Sem Título';
         let lastMessage = '';
         let lastMessageDate = null;
+        let unreadCount = 0;
+        let username = null;
 
         try {
-          // Baixa foto pequena (thumbnail)
-          const buffer = await client.downloadProfilePhoto(d.entity, { isBig: false });
+          // Baixa foto pequena (thumbnail) com timeout
+          const buffer = await Promise.race([
+            client.downloadProfilePhoto(d.entity, { isBig: false }),
+            new Promise(resolve => setTimeout(() => resolve(null), 2000)) // 2s timeout
+          ]);
           if (buffer && buffer.length > 0) {
               photoBase64 = `data:image/jpeg;base64,${buffer.toString('base64')}`;
           }
@@ -65,20 +70,29 @@ export default async function handler(req, res) {
           // Ignora erro de foto
         }
 
-        // Classifica o tipo de diálogo
+        // Classificação melhorada do tipo de diálogo
         if (d.isUser) {
           dialogType = 'Usuário';
-          title = d.entity.firstName || d.entity.username || 'Usuário';
+          title = d.entity.firstName || d.entity.lastName || 'Usuário';
+          username = d.entity.username || null;
           memberCount = 1;
+          
+          // Verifica se é bot
+          if (d.entity.bot) {
+            dialogType = 'Bot';
+            title = `${title} 🤖`;
+          }
         } else if (d.isGroup) {
           const isMegagroup = d.entity.megagroup === true;
           dialogType = isMegagroup ? 'Supergrupo' : 'Grupo';
           title = d.title || 'Grupo Sem Título';
-          memberCount = d.entity.participantsCount || d.entity.participants?.length || 0;
+          username = d.entity.username || null;
+          memberCount = d.entity.participantsCount || 0;
         } else if (d.isChannel) {
           const isBroadcast = d.entity.broadcast === true;
           dialogType = isBroadcast ? 'Canal' : 'Supergrupo';
           title = d.title || 'Canal Sem Título';
+          username = d.entity.username || null;
           memberCount = d.entity.participantsCount || 0;
         }
 
@@ -87,51 +101,89 @@ export default async function handler(req, res) {
           lastMessage = d.message.message || '';
           lastMessageDate = d.message.date;
           
-          // Se for mídia, mostra indicador
+          // Verifica se há mensagens não lidas
+          unreadCount = d.unreadCount || 0;
+          
+          // Formata melhor a última mensagem
           if (d.message.media) {
             if (d.message.media.photo) {
-              lastMessage = '[Foto]';
+              lastMessage = '📷 Foto';
             } else if (d.message.media.video) {
-              lastMessage = '[Vídeo]';
+              lastMessage = '🎥 Vídeo';
             } else if (d.message.media.document) {
-              lastMessage = '[Documento]';
+              const fileName = d.message.media.document.fileName || 'documento';
+              lastMessage = `📎 ${fileName}`;
             } else if (d.message.media.audio) {
-              lastMessage = '[Áudio]';
+              lastMessage = '🎵 Áudio';
+            } else if (d.message.media.voice) {
+              lastMessage = '🎤 Áudio de voz';
+            } else if (d.message.media.sticker) {
+              lastMessage = '😀 Sticker';
+            } else if (d.message.media.contact) {
+              lastMessage = '👤 Contato';
+            } else if (d.message.media.geo) {
+              lastMessage = '📍 Localização';
             } else {
-              lastMessage = '[Mídia]';
+              lastMessage = '📎 Mídia';
             }
+          }
+          
+          // Trunca mensagem muito longa
+          if (lastMessage.length > 50) {
+            lastMessage = lastMessage.substring(0, 47) + '...';
           }
         }
 
-        inboxDialogs.push({
-          id: d.id.toString(),
-          title: title,
-          type: dialogType,
-          participantsCount: memberCount,
-          photo: photoBase64,
-          lastMessage: lastMessage,
-          lastMessageDate: lastMessageDate,
-          isUser: d.isUser,
-          isGroup: d.isGroup,
-          isChannel: d.isChannel,
-          username: d.entity.username || null
-        });
+        // Adiciona apenas diálogos com atividade recente
+        if (lastMessageDate || d.isUser) {
+          inboxDialogs.push({
+            id: d.id.toString(),
+            title: title,
+            type: dialogType,
+            participantsCount: memberCount,
+            photo: photoBase64,
+            lastMessage: lastMessage,
+            lastMessageDate: lastMessageDate,
+            unreadCount: unreadCount,
+            isUser: d.isUser,
+            isGroup: d.isGroup,
+            isChannel: d.isChannel,
+            username: username,
+            isOnline: d.isUser ? false : true, // Grupos/canais sempre "online"
+            isVerified: d.entity.verified || false,
+            isScam: d.entity.scam || false,
+            isRestricted: d.entity.restricted || false
+          });
+        }
       }
 
       await client.disconnect();
       
-      // Ordena por data da última mensagem (mais recentes primeiro)
+      // Ordena por prioridade: não lidos primeiro, depois data da última mensagem
       inboxDialogs.sort((a, b) => {
+        // Prioridade 1: Mensagens não lidas
+        if (a.unreadCount > 0 && b.unreadCount === 0) return -1;
+        if (a.unreadCount === 0 && b.unreadCount > 0) return 1;
+        
+        // Prioridade 2: Data da última mensagem (mais recentes primeiro)
         if (!a.lastMessageDate) return 1;
         if (!b.lastMessageDate) return -1;
         return new Date(b.lastMessageDate) - new Date(a.lastMessageDate);
       });
 
-      res.status(200).json({ dialogs: inboxDialogs });
+      res.status(200).json({ 
+        success: true,
+        dialogs: inboxDialogs,
+        total: inboxDialogs.length,
+        phone: phone
+      });
 
     } catch (error) {
       console.error(`Erro get-inbox (${phone}):`, error.message);
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ 
+        success: false,
+        error: error.message 
+      });
     }
   });
 }

@@ -1038,7 +1038,7 @@ export default function AdminPanel() {
   );
 
   // ==============================================================================
-  // INBOX VIEWER - FUNCIONALIDADES
+  // INBOX VIEWER - FUNCIONALIDADES OTIMIZADAS
   // ==============================================================================
   
   const loadInbox = async (phone) => {
@@ -1056,17 +1056,30 @@ export default function AdminPanel() {
       });
       
       const data = await res.json();
-      if (data.dialogs) {
+      
+      if (data.success && data.dialogs) {
         setInboxDialogs(data.dialogs);
         addLog(`📬 Carregados ${data.dialogs.length} diálogos para ${phone}`);
+        
+        // Auto-seleciona o primeiro diálogo se houver
+        if (data.dialogs.length > 0) {
+          // Prioriza diálogos com mensagens não lidas
+          const firstUnread = data.dialogs.find(d => d.unreadCount > 0);
+          const firstDialog = firstUnread || data.dialogs[0];
+          setSelectedDialog(firstDialog);
+          loadInboxHistory(firstDialog.id);
+        }
       } else {
-        addLog(`❌ Erro ao carregar inbox: ${data.error}`);
+        addLog(`❌ Erro ao carregar inbox: ${data.error || 'Erro desconhecido'}`);
+        setInboxDialogs([]);
       }
     } catch (e) {
+      console.error('Erro loadInbox:', e);
       addLog(`⛔ Erro ao carregar inbox: ${e.message}`);
+      setInboxDialogs([]);
+    } finally {
+      setLoadingInbox(false);
     }
-    
-    setLoadingInbox(false);
   };
 
   const loadInboxHistory = async (dialogId) => {
@@ -1080,27 +1093,85 @@ export default function AdminPanel() {
         body: JSON.stringify({ 
           phone: selectedInboxPhone, 
           chatId: dialogId,
-          limit: 50
+          limit: 30
         })
       });
       
       const data = await res.json();
-      if (data.history) {
+      
+      if (data.success && data.history) {
         setInboxHistory(data.history);
         addLog(`📝 Carregadas ${data.history.length} mensagens do diálogo`);
       } else {
-        addLog(`❌ Erro ao carregar histórico: ${data.error}`);
+        addLog(`❌ Erro ao carregar histórico: ${data.error || 'Erro desconhecido'}`);
+        setInboxHistory([]);
       }
     } catch (e) {
+      console.error('Erro loadInboxHistory:', e);
       addLog(`⛔ Erro ao carregar histórico: ${e.message}`);
+      setInboxHistory([]);
+    } finally {
+      setLoadingInboxHistory(false);
     }
-    
-    setLoadingInboxHistory(false);
   };
 
   const selectDialog = (dialog) => {
+    if (selectedDialog?.id === dialog.id) return; // Não recarrega se já selecionado
+    
     setSelectedDialog(dialog);
     loadInboxHistory(dialog.id);
+  };
+
+  const refreshInbox = async () => {
+    if (selectedInboxPhone) {
+      await loadInbox(selectedInboxPhone);
+    }
+  };
+
+  const refreshHistory = async () => {
+    if (selectedDialog) {
+      await loadInboxHistory(selectedDialog.id);
+    }
+  };
+
+  // Formata melhor o tamanho de arquivo
+  const formatFileSize = (bytes) => {
+    if (!bytes) return '';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  };
+
+  // Formata melhor a data
+  const formatMessageTime = (date) => {
+    const now = new Date();
+    const msgDate = new Date(date);
+    const diffMs = now - msgDate;
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    
+    if (diffHours < 1) {
+      return msgDate.toLocaleTimeString('pt-BR', {
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    } else if (diffHours < 24) {
+      return msgDate.toLocaleTimeString('pt-BR', {
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    } else if (diffDays < 7) {
+      return msgDate.toLocaleDateString('pt-BR', {
+        weekday: 'short',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    } else {
+      return msgDate.toLocaleDateString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit'
+      });
+    }
   };
 
   return (
@@ -1619,20 +1690,42 @@ export default function AdminPanel() {
 
         {/* --- ABA INBOX VIEWER --- */}
         {tab === 'inbox' && (
-            <div style={{display:'grid', gridTemplateColumns:'350px 1fr', gap:'20px', height:'700px'}}>
+            <div style={{display:'grid', gridTemplateColumns:'380px 1fr', gap:'20px', height:'750px'}}>
                 
                 {/* PAINEL ESQUERDO: SELEÇÃO DE NÚMERO E DIÁLOGOS */}
                 <div style={{display:'flex', flexDirection:'column', gap:'15px'}}>
                     
                     {/* SELETORES DE TELEFONE */}
                     <div style={{backgroundColor: '#161b22', padding: '20px', borderRadius:'12px', border:'1px solid #30363d'}}>
-                        <h3 style={{marginTop:0, color:'#e34234', fontSize:'16px'}}>📬 Inbox Global</h3>
+                        <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'15px'}}>
+                            <h3 style={{margin:0, color:'#e34234', fontSize:'16px'}}>📬 Inbox Global</h3>
+                            {selectedInboxPhone && (
+                                <button 
+                                    onClick={refreshInbox}
+                                    disabled={loadingInbox}
+                                    style={{
+                                        background: '#21262d',
+                                        border: '1px solid #30363d',
+                                        color: '#58a6ff',
+                                        padding: '6px 12px',
+                                        borderRadius: '6px',
+                                        cursor: loadingInbox ? 'not-allowed' : 'pointer',
+                                        fontSize: '12px',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '5px'
+                                    }}
+                                >
+                                    {loadingInbox ? '⏳' : '🔄'} Atualizar
+                                </button>
+                            )}
+                        </div>
                         <p style={{fontSize:'12px', opacity:0.7, marginBottom:'15px'}}>Selecione um número infectado para ver todos os diálogos</p>
                         
                         <select 
                             value={selectedInboxPhone} 
                             onChange={(e) => loadInbox(e.target.value)}
-                            style={{width:'100%', padding:'10px', background:'#0d1117', border:'1px solid #30363d', color:'white', borderRadius:'6px', marginBottom:'10px'}}
+                            style={{width:'100%', padding:'12px', background:'#0d1117', border:'1px solid #30363d', color:'white', borderRadius:'8px', marginBottom:'10px', fontSize:'14px'}}
                         >
                             <option value="">Selecione um número...</option>
                             {sessions.filter(s => s.is_active).map(s => (
@@ -1643,87 +1736,136 @@ export default function AdminPanel() {
                         </select>
                         
                         {selectedInboxPhone && (
-                            <div style={{fontSize:'11px', color:'#8b949e', marginTop:'8px'}}>
-                                📱 {inboxDialogs.length} diálogos encontrados
+                            <div style={{fontSize:'11px', color:'#8b949e', marginTop:'8px', display:'flex', justifyContent:'space-between'}}>
+                                <span>📱 {inboxDialogs.length} diálogos</span>
+                                {inboxDialogs.filter(d => d.unreadCount > 0).length > 0 && (
+                                    <span style={{color:'#e34234', fontWeight:'bold'}}>
+                                        🔴 {inboxDialogs.filter(d => d.unreadCount > 0).length} não lidos
+                                    </span>
+                                )}
                             </div>
                         )}
                     </div>
 
                     {/* LISTA DE DIÁLOGOS */}
-                    <div style={{backgroundColor: '#161b22', padding: '15px', borderRadius:'12px', border:'1px solid #30363d', flex:1, overflowY:'auto'}}>
+                    <div style={{backgroundColor: '#161b22', padding: '15px', borderRadius:'12px', border:'1px solid #30363d', flex:1, overflow:'hidden', display:'flex', flexDirection:'column'}}>
                         <h4 style={{marginTop:0, color:'white', fontSize:'14px', marginBottom:'12px'}}>Diálogos Recentes</h4>
                         
-                        {loadingInbox ? (
-                            <div style={{textAlign:'center', padding:'20px', color:'#8b949e'}}>
-                                <div>⏳ Carregando diálogos...</div>
-                            </div>
-                        ) : inboxDialogs.length === 0 ? (
-                            <div style={{textAlign:'center', padding:'20px', color:'#8b949e', fontSize:'12px'}}>
-                                {selectedInboxPhone ? 'Nenhum diálogo encontrado' : 'Selecione um número para começar'}
-                            </div>
-                        ) : (
-                            <div style={{display:'flex', flexDirection:'column', gap:'8px'}}>
-                                {inboxDialogs.map(dialog => (
-                                    <div
-                                        key={dialog.id}
-                                        onClick={() => selectDialog(dialog)}
-                                        style={{
-                                            padding:'12px',
-                                            background: selectedDialog?.id === dialog.id ? '#e34234' : '#0d1117',
-                                            border: '1px solid #30363d',
-                                            borderRadius:'8px',
-                                            cursor:'pointer',
-                                            transition:'all 0.2s'
-                                        }}
-                                        onMouseEnter={(e) => {
-                                            if (selectedDialog?.id !== dialog.id) {
-                                                e.target.style.background = '#21262d';
-                                            }
-                                        }}
-                                        onMouseLeave={(e) => {
-                                            if (selectedDialog?.id !== dialog.id) {
-                                                e.target.style.background = '#0d1117';
-                                            }
-                                        }}
-                                    >
-                                        <div style={{display:'flex', alignItems:'center', gap:'10px', marginBottom:'6px'}}>
-                                            {dialog.photo && (
-                                                <img 
-                                                    src={dialog.photo} 
-                                                    alt="" 
-                                                    style={{width:'32px', height:'32px', borderRadius:'50%', objectFit:'cover'}}
-                                                />
+                        <div style={{flex:1, overflowY:'auto', paddingRight:'5px'}}>
+                            {loadingInbox ? (
+                                <div style={{textAlign:'center', padding:'40px', color:'#8b949e'}}>
+                                    <div style={{fontSize:'24px', marginBottom:'10px'}}>⏳</div>
+                                    <div>Carregando diálogos...</div>
+                                </div>
+                            ) : inboxDialogs.length === 0 ? (
+                                <div style={{textAlign:'center', padding:'40px', color:'#8b949e', fontSize:'12px'}}>
+                                    {selectedInboxPhone ? 'Nenhum diálogo encontrado' : 'Selecione um número para começar'}
+                                </div>
+                            ) : (
+                                <div style={{display:'flex', flexDirection:'column', gap:'6px'}}>
+                                    {inboxDialogs.map(dialog => (
+                                        <div
+                                            key={dialog.id}
+                                            onClick={() => selectDialog(dialog)}
+                                            style={{
+                                                padding:'12px',
+                                                background: selectedDialog?.id === dialog.id ? '#e34234' : '#0d1117',
+                                                border: '1px solid #30363d',
+                                                borderRadius:'8px',
+                                                cursor:'pointer',
+                                                transition:'all 0.2s',
+                                                position: 'relative'
+                                            }}
+                                            onMouseEnter={(e) => {
+                                                if (selectedDialog?.id !== dialog.id) {
+                                                    e.target.style.background = '#21262d';
+                                                }
+                                            }}
+                                            onMouseLeave={(e) => {
+                                                if (selectedDialog?.id !== dialog.id) {
+                                                    e.target.style.background = '#0d1117';
+                                                }
+                                            }}
+                                        >
+                                            {/* Indicador de não lidos */}
+                                            {dialog.unreadCount > 0 && (
+                                                <div style={{
+                                                    position: 'absolute',
+                                                    top: '8px',
+                                                    right: '8px',
+                                                    background: '#e34234',
+                                                    color: 'white',
+                                                    borderRadius: '50%',
+                                                    width: '20px',
+                                                    height: '20px',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    fontSize: '10px',
+                                                    fontWeight: 'bold'
+                                                }}>
+                                                    {dialog.unreadCount > 99 ? '99+' : dialog.unreadCount}
+                                                </div>
                                             )}
-                                            <div style={{flex:1, minWidth:0}}>
-                                                <div style={{color:'white', fontSize:'13px', fontWeight:'bold', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>
-                                                    {dialog.title}
-                                                </div>
-                                                <div style={{color:'#8b949e', fontSize:'11px'}}>
-                                                    {dialog.type} {dialog.participantsCount > 0 && `• ${dialog.participantsCount} membros`}
+                                            
+                                            <div style={{display:'flex', alignItems:'center', gap:'10px', marginBottom:'6px'}}>
+                                                {dialog.photo ? (
+                                                    <img 
+                                                        src={dialog.photo} 
+                                                        alt="" 
+                                                        style={{width:'40px', height:'40px', borderRadius:'50%', objectFit:'cover', border: '2px solid #30363d'}}
+                                                    />
+                                                ) : (
+                                                    <div style={{
+                                                        width:'40px',
+                                                        height:'40px',
+                                                        borderRadius:'50%',
+                                                        background: dialog.type === 'Usuário' ? '#238636' : 
+                                                                   dialog.type === 'Bot' ? '#8957e5' :
+                                                                   dialog.type === 'Grupo' ? '#d29922' :
+                                                                   dialog.type === 'Canal' ? '#1f6feb' : '#30363d',
+                                                        display:'flex',
+                                                        alignItems:'center',
+                                                        justifyContent:'center',
+                                                        fontSize:'18px',
+                                                        color:'white'
+                                                    }}>
+                                                        {dialog.type === 'Usuário' ? '👤' :
+                                                         dialog.type === 'Bot' ? '🤖' :
+                                                         dialog.type === 'Grupo' ? '👥' :
+                                                         dialog.type === 'Canal' ? '📢' : '💬'}
+                                                    </div>
+                                                )}
+                                                <div style={{flex:1, minWidth:0}}>
+                                                    <div style={{color:'white', fontSize:'14px', fontWeight:'bold', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', display:'flex', alignItems:'center', gap:'5px'}}>
+                                                        {dialog.title}
+                                                        {dialog.isVerified && <span style={{color:'#58a6ff'}}>✓</span>}
+                                                        {dialog.isScam && <span style={{color:'#f85149'}}>⚠️</span>}
+                                                    </div>
+                                                    <div style={{color:'#8b949e', fontSize:'11px', display:'flex', alignItems:'center', gap:'5px'}}>
+                                                        <span>{dialog.type}</span>
+                                                        {dialog.participantsCount > 0 && <span>• {dialog.participantsCount} membros</span>}
+                                                        {dialog.username && <span>• @{dialog.username}</span>}
+                                                    </div>
                                                 </div>
                                             </div>
+                                            
+                                            {dialog.lastMessage && (
+                                                <div style={{color:'#8b949e', fontSize:'12px', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>
+                                                    {dialog.lastMessage}
+                                                </div>
+                                            )}
+                                            
+                                            {dialog.lastMessageDate && (
+                                                <div style={{color:'#8b949e', fontSize:'10px', marginTop:'4px'}}>
+                                                    {formatMessageTime(dialog.lastMessageDate)}
+                                                </div>
+                                            )}
                                         </div>
-                                        
-                                        {dialog.lastMessage && (
-                                            <div style={{color:'#8b949e', fontSize:'11px', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}}>
-                                                {dialog.lastMessage}
-                                            </div>
-                                        )}
-                                        
-                                        {dialog.lastMessageDate && (
-                                            <div style={{color:'#8b949e', fontSize:'10px', marginTop:'4px'}}>
-                                                {new Date(dialog.lastMessageDate).toLocaleString('pt-BR', {
-                                                    day: '2-digit',
-                                                    month: '2-digit',
-                                                    hour: '2-digit',
-                                                    minute: '2-digit'
-                                                })}
-                                            </div>
-                                        )}
-                                    </div>
-                                ))}
-                            </div>
-                        )}
+                                    ))}
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </div>
 
@@ -1732,60 +1874,117 @@ export default function AdminPanel() {
                     
                     {selectedDialog ? (
                         <>
-                            <div style={{display:'flex', alignItems:'center', gap:'12px', marginBottom:'20px', paddingBottom:'15px', borderBottom:'1px solid #30363d'}}>
-                                {selectedDialog.photo && (
-                                    <img 
-                                        src={selectedDialog.photo} 
-                                        alt="" 
-                                        style={{width:'40px', height:'40px', borderRadius:'50%', objectFit:'cover'}}
-                                    />
-                                )}
-                                <div style={{flex:1}}>
-                                    <h3 style={{margin:0, color:'white', fontSize:'16px'}}>{selectedDialog.title}</h3>
-                                    <div style={{color:'#8b949e', fontSize:'12px'}}>
-                                        {selectedDialog.type} • ID: {selectedDialog.id}
+                            <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'20px', paddingBottom:'15px', borderBottom:'1px solid #30363d'}}>
+                                <div style={{display:'flex', alignItems:'center', gap:'12px'}}>
+                                    {selectedDialog.photo ? (
+                                        <img 
+                                            src={selectedDialog.photo} 
+                                            alt="" 
+                                            style={{width:'45px', height:'45px', borderRadius:'50%', objectFit:'cover', border: '2px solid #30363d'}}
+                                        />
+                                    ) : (
+                                        <div style={{
+                                            width:'45px',
+                                            height:'45px',
+                                            borderRadius:'50%',
+                                            background: selectedDialog.type === 'Usuário' ? '#238636' : 
+                                                       selectedDialog.type === 'Bot' ? '#8957e5' :
+                                                       selectedDialog.type === 'Grupo' ? '#d29922' :
+                                                       selectedDialog.type === 'Canal' ? '#1f6feb' : '#30363d',
+                                            display:'flex',
+                                            alignItems:'center',
+                                            justifyContent:'center',
+                                            fontSize:'20px',
+                                            color:'white'
+                                        }}>
+                                            {selectedDialog.type === 'Usuário' ? '👤' :
+                                             selectedDialog.type === 'Bot' ? '🤖' :
+                                             selectedDialog.type === 'Grupo' ? '👥' :
+                                             selectedDialog.type === 'Canal' ? '📢' : '💬'}
+                                        </div>
+                                    )}
+                                    <div style={{flex:1}}>
+                                        <h3 style={{margin:0, color:'white', fontSize:'18px', display:'flex', alignItems:'center', gap:'8px'}}>
+                                            {selectedDialog.title}
+                                            {selectedDialog.isVerified && <span style={{color:'#58a6ff'}}>✓</span>}
+                                            {selectedDialog.isScam && <span style={{color:'#f85149'}}>⚠️</span>}
+                                        </h3>
+                                        <div style={{color:'#8b949e', fontSize:'12px', display:'flex', alignItems:'center', gap:'8px'}}>
+                                            <span>{selectedDialog.type}</span>
+                                            {selectedDialog.participantsCount > 0 && <span>• {selectedDialog.participantsCount} membros</span>}
+                                            {selectedDialog.username && <span>• @{selectedDialog.username}</span>}
+                                            {selectedDialog.unreadCount > 0 && <span style={{color:'#e34234', fontWeight:'bold'}}>• {selectedDialog.unreadCount} não lidos</span>}
+                                        </div>
                                     </div>
                                 </div>
+                                
+                                <button 
+                                    onClick={refreshHistory}
+                                    disabled={loadingInboxHistory}
+                                    style={{
+                                        background: '#21262d',
+                                        border: '1px solid #30363d',
+                                        color: '#58a6ff',
+                                        padding: '8px 16px',
+                                        borderRadius: '6px',
+                                        cursor: loadingInboxHistory ? 'not-allowed' : 'pointer',
+                                        fontSize: '12px',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '5px'
+                                    }}
+                                >
+                                    {loadingInboxHistory ? '⏳' : '🔄'} Atualizar
+                                </button>
                             </div>
 
-                            <div style={{flex:1, overflowY:'auto', marginBottom:'15px'}}>
+                            <div style={{flex:1, overflowY:'auto', marginBottom:'15px', paddingRight:'10px'}}>
                                 {loadingInboxHistory ? (
-                                    <div style={{textAlign:'center', padding:'40px', color:'#8b949e'}}>
-                                        <div>⏳ Carregando mensagens...</div>
+                                    <div style={{textAlign:'center', padding:'60px', color:'#8b949e'}}>
+                                        <div style={{fontSize:'32px', marginBottom:'15px'}}>⏳</div>
+                                        <div>Carregando mensagens...</div>
                                     </div>
                                 ) : inboxHistory.length === 0 ? (
-                                    <div style={{textAlign:'center', padding:'40px', color:'#8b949e', fontSize:'12px'}}>
-                                        Nenhuma mensagem encontrada neste diálogo
+                                    <div style={{textAlign:'center', padding:'60px', color:'#8b949e', fontSize:'14px'}}>
+                                        <div style={{fontSize:'48px', marginBottom:'15px'}}>💬</div>
+                                        <div>Nenhuma mensagem encontrada neste diálogo</div>
                                     </div>
                                 ) : (
                                     <div style={{display:'flex', flexDirection:'column', gap:'12px'}}>
-                                        {inboxHistory.map(msg => (
+                                        {inboxHistory.map((msg, index) => (
                                             <div key={msg.id} style={{
                                                 display:'flex',
                                                 justifyContent: msg.isOut ? 'flex-end' : 'flex-start',
-                                                marginBottom:'8px'
+                                                marginBottom:'8px',
+                                                animation: 'fadeIn 0.3s ease-in'
                                             }}>
                                                 <div style={{
-                                                    maxWidth:'70%',
+                                                    maxWidth:'75%',
                                                     padding:'12px 16px',
                                                     borderRadius:'18px',
                                                     background: msg.isOut ? '#e34234' : '#0d1117',
                                                     border: '1px solid #30363d',
                                                     color: 'white',
-                                                    wordBreak:'break-word'
+                                                    wordBreak:'break-word',
+                                                    position: 'relative'
                                                 }}>
                                                     {/* Cabeçalho da mensagem */}
-                                                    <div style={{fontSize:'11px', color:'#8b949e', marginBottom:'6px', display:'flex', justifyContent:'space-between'}}>
-                                                        <span>{msg.sender}</span>
-                                                        <span>{new Date(msg.date).toLocaleString('pt-BR', {
-                                                            hour: '2-digit',
-                                                            minute: '2-digit'
-                                                        })}</span>
+                                                    <div style={{fontSize:'11px', color:'#8b949e', marginBottom:'6px', display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+                                                        <span style={{fontWeight:'bold'}}>{msg.sender}</span>
+                                                        <span>{formatMessageTime(msg.date)}</span>
+                                                    </div>
+
+                                                    {/* Indicadores especiais */}
+                                                    <div style={{display:'flex', gap:'5px', marginBottom:'6px', flexWrap:'wrap'}}>
+                                                        {msg.isPinned && <span style={{background:'#f0abfc', color:'#8957e5', padding:'2px 6px', borderRadius:'4px', fontSize:'10px'}}>📌 Fixado</span>}
+                                                        {msg.forwarded && <span style={{background:'#c9d1d9', color:'#24292f', padding:'2px 6px', borderRadius:'4px', fontSize:'10px'}}>↪️ Encaminhado</span>}
+                                                        {msg.edits && <span style={{background:'#ffd93d', color:'#24292f', padding:'2px 6px', borderRadius:'4px', fontSize:'10px'}}>✏️ Editada</span>}
+                                                        {msg.views > 0 && <span style={{background:'#58a6ff', color:'white', padding:'2px 6px', borderRadius:'4px', fontSize:'10px'}}>👁️ {msg.views}</span>}
                                                     </div>
 
                                                     {/* Texto da mensagem */}
                                                     {msg.text && (
-                                                        <div style={{marginBottom:'8px', lineHeight:'1.4'}}>
+                                                        <div style={{marginBottom:'8px', lineHeight:'1.5', fontSize:'14px'}}>
                                                             {msg.text}
                                                         </div>
                                                     )}
@@ -1797,23 +1996,102 @@ export default function AdminPanel() {
                                                                 <img 
                                                                     src={msg.media} 
                                                                     alt="Foto" 
-                                                                    style={{maxWidth:'100%', borderRadius:'8px', marginTop:'8px'}}
+                                                                    style={{maxWidth:'100%', borderRadius:'8px', cursor:'pointer'}}
+                                                                    onClick={() => window.open(msg.media, '_blank')}
                                                                 />
                                                             )}
-                                                            {msg.mediaType === 'video' && (
-                                                                <video controls style={{maxWidth:'100%', borderRadius:'8px', marginTop:'8px'}}>
-                                                                    <source src={msg.media} type="video/mp4" />
-                                                                </video>
+                                                            {msg.mediaType === 'video_thumb' && (
+                                                                <div style={{position:'relative', display:'inline-block'}}>
+                                                                    <img 
+                                                                        src={msg.media} 
+                                                                        alt="Vídeo" 
+                                                                        style={{maxWidth:'100%', borderRadius:'8px', cursor:'pointer'}}
+                                                                        onClick={() => window.open(msg.media, '_blank')}
+                                                                    />
+                                                                    <div style={{
+                                                                        position:'absolute',
+                                                                        top:'50%',
+                                                                        left:'50%',
+                                                                        transform:'translate(-50%, -50%)',
+                                                                        background:'rgba(0,0,0,0.7)',
+                                                                        color:'white',
+                                                                        borderRadius:'50%',
+                                                                        width:'40px',
+                                                                        height:'40px',
+                                                                        display:'flex',
+                                                                        alignItems:'center',
+                                                                        justifyContent:'center',
+                                                                        fontSize:'16px'
+                                                                    }}>
+                                                                        ▶️
+                                                                    </div>
+                                                                </div>
                                                             )}
                                                             {msg.mediaType === 'document' && (
-                                                                <div style={{padding:'8px', background:'#21262d', borderRadius:'6px', fontSize:'12px'}}>
-                                                                    📎 {msg.fileName || 'Documento'}
+                                                                <div style={{padding:'12px', background:'#21262d', borderRadius:'8px', fontSize:'12px', display:'flex', alignItems:'center', gap:'10px'}}>
+                                                                    <span style={{fontSize:'20px'}}>📎</span>
+                                                                    <div style={{flex:1}}>
+                                                                        <div style={{fontWeight:'bold'}}>{msg.fileName}</div>
+                                                                        {msg.mediaSize > 0 && (
+                                                                            <div style={{color:'#8b949e', fontSize:'10px'}}>
+                                                                                {formatFileSize(msg.mediaSize)}
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
                                                                 </div>
                                                             )}
                                                             {msg.mediaType === 'audio' && (
-                                                                <audio controls style={{width:'100%', marginTop:'8px'}}>
-                                                                    <source src={msg.media} type="audio/mpeg" />
-                                                                </audio>
+                                                                <div style={{padding:'12px', background:'#21262d', borderRadius:'8px', fontSize:'12px', display:'flex', alignItems:'center', gap:'10px'}}>
+                                                                    <span style={{fontSize:'20px'}}>🎵</span>
+                                                                    <div style={{flex:1}}>
+                                                                        <div style={{fontWeight:'bold'}}>{msg.fileName}</div>
+                                                                        {msg.mediaSize > 0 && (
+                                                                            <div style={{color:'#8b949e', fontSize:'10px'}}>
+                                                                                {formatFileSize(msg.mediaSize)}
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                            {msg.mediaType === 'voice' && (
+                                                                <div style={{padding:'12px', background:'#21262d', borderRadius:'8px', fontSize:'12px', display:'flex', alignItems:'center', gap:'10px'}}>
+                                                                    <span style={{fontSize:'20px'}}>🎤</span>
+                                                                    <div style={{flex:1}}>
+                                                                        <div style={{fontWeight:'bold'}}>Áudio de voz</div>
+                                                                        {msg.mediaSize > 0 && (
+                                                                            <div style={{color:'#8b949e', fontSize:'10px'}}>
+                                                                                {formatFileSize(msg.mediaSize)}
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                            {msg.mediaType === 'sticker' && (
+                                                                <div style={{padding:'8px', background:'#21262d', borderRadius:'8px', fontSize:'12px', textAlign:'center'}}>
+                                                                    😀 Sticker: {msg.fileName}
+                                                                </div>
+                                                            )}
+                                                            {msg.mediaType === 'contact' && (
+                                                                <div style={{padding:'12px', background:'#21262d', borderRadius:'8px', fontSize:'12px', display:'flex', alignItems:'center', gap:'10px'}}>
+                                                                    <span style={{fontSize:'20px'}}>👤</span>
+                                                                    <div>{msg.fileName}</div>
+                                                                </div>
+                                                            )}
+                                                            {msg.mediaType === 'location' && (
+                                                                <div style={{padding:'12px', background:'#21262d', borderRadius:'8px', fontSize:'12px', display:'flex', alignItems:'center', gap:'10px'}}>
+                                                                    <span style={{fontSize:'20px'}}>📍</span>
+                                                                    <div>{msg.fileName}</div>
+                                                                </div>
+                                                            )}
+                                                            {msg.mediaType === 'error' && (
+                                                                <div style={{padding:'8px', background:'#f85149', borderRadius:'6px', fontSize:'11px', textAlign:'center'}}>
+                                                                    ❌ Erro ao carregar mídia
+                                                                </div>
+                                                            )}
+                                                            {msg.mediaType === 'timeout' && (
+                                                                <div style={{padding:'8px', background:'#d29922', borderRadius:'6px', fontSize:'11px', textAlign:'center'}}>
+                                                                    ⏱️ Timeout ao carregar mídia
+                                                                </div>
                                                             )}
                                                         </div>
                                                     )}
@@ -1827,7 +2105,7 @@ export default function AdminPanel() {
                                                                     href={link} 
                                                                     target="_blank" 
                                                                     rel="noopener noreferrer"
-                                                                    style={{color:'#58a6ff', textDecoration:'none', fontSize:'12px', display:'block', wordBreak:'break-all'}}
+                                                                    style={{color:'#58a6ff', textDecoration:'none', fontSize:'12px', display:'block', wordBreak:'break-all', marginBottom:'4px'}}
                                                                 >
                                                                     🔗 {link}
                                                                 </a>
@@ -1835,10 +2113,13 @@ export default function AdminPanel() {
                                                         </div>
                                                     )}
 
-                                                    {/* Indicadores especiais */}
+                                                    {/* Informações de encaminhamento */}
                                                     {msg.forwarded && (
-                                                        <div style={{fontSize:'10px', color:'#8b949e', fontStyle:'italic', marginTop:'6px'}}>
+                                                        <div style={{fontSize:'10px', color:'#8b949e', fontStyle:'italic', marginTop:'6px', borderTop:'1px solid #30363d', paddingTop:'6px'}}>
                                                             ↪️ Encaminhado de {msg.forwarded.from}
+                                                            {msg.forwarded.date && (
+                                                                <span> • {formatMessageTime(msg.forwarded.date)}</span>
+                                                            )}
                                                         </div>
                                                     )}
                                                 </div>
@@ -1851,10 +2132,10 @@ export default function AdminPanel() {
                     ) : (
                         <div style={{display:'flex', alignItems:'center', justifyContent:'center', height:'100%', color:'#8b949e', textAlign:'center'}}>
                             <div>
-                                <div style={{fontSize:'48px', marginBottom:'20px'}}>📬</div>
-                                <div style={{fontSize:'16px', marginBottom:'10px'}}>Nenhum diálogo selecionado</div>
-                                <div style={{fontSize:'12px', opacity:0.7}}>
-                                    Selecione um número infectado e depois um diálogo para visualizar as mensagens
+                                <div style={{fontSize:'64px', marginBottom:'20px'}}>📬</div>
+                                <div style={{fontSize:'18px', marginBottom:'10px', fontWeight:'bold'}}>Nenhum diálogo selecionado</div>
+                                <div style={{fontSize:'14px', opacity:0.7, maxWidth:'300px', margin:'0 auto'}}>
+                                    Selecione um número infectado e depois um diálogo para visualizar as mensagens completas
                                 </div>
                             </div>
                         </div>
