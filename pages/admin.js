@@ -66,7 +66,7 @@ export default function AdminPanel() {
   const [inboxHistory, setInboxHistory] = useState([]);
   const [loadingInboxHistory, setLoadingInboxHistory] = useState(false);
   const [loadingInbox, setLoadingInbox] = useState(false);
-  // const [loadingBotFlow, setLoadingBotFlow] = useState(false); // Temporariamente desabilitado
+  const [loadingBotFlow, setLoadingBotFlow] = useState(false);
 
   // --- ESTADOS DE GRUPOS E DISPAROS SEGMENTADOS ---
   const [createdGroups, setCreatedGroups] = useState([]);
@@ -1083,7 +1083,6 @@ export default function AdminPanel() {
     }
   };
 
-  /*
   const cloneBotFlow = async () => {
     if (!selectedInboxPhone || !selectedDialog) {
       addLog('❌ Selecione um bot para clonar o fluxo');
@@ -1166,7 +1165,6 @@ export default function AdminPanel() {
       setLoadingBotFlow(false);
     }
   };
-  */
 
   const loadInboxHistory = async (dialogId) => {
     if (!selectedInboxPhone || !dialogId) {
@@ -1190,7 +1188,7 @@ export default function AdminPanel() {
         body: JSON.stringify({ 
           phone: selectedInboxPhone, 
           chatId: dialogId,
-          limit: 30
+          limit: 100 // Aumentado para mostrar histórico completo
         })
       });
       
@@ -2047,7 +2045,39 @@ export default function AdminPanel() {
                                     </div>
                                     
                                     <div style={{display:'flex', gap:'12px'}}>
-                                        {/* Botão de clonar fluxo temporariamente removido para debug */}
+                                        {selectedDialog && selectedDialog.type === 'Bot' && (
+                                            <button 
+                                                onClick={cloneBotFlow}
+                                                disabled={loadingBotFlow}
+                                                style={{
+                                                    background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                                                    border: '1px solid #10b981',
+                                                    color: 'white',
+                                                    padding: '10px 20px',
+                                                    borderRadius: '12px',
+                                                    cursor: loadingBotFlow ? 'not-allowed' : 'pointer',
+                                                    fontSize: '13px',
+                                                    display:'flex',
+                                                    alignItems:'center',
+                                                    gap:'8px',
+                                                    fontWeight:'500',
+                                                    boxShadow:'0 2px 8px rgba(16, 185, 129, 0.3)',
+                                                    transition:'all 0.2s ease'
+                                                }}
+                                                onMouseEnter={(e) => {
+                                                    if (!loadingBotFlow) {
+                                                        e.target.style.background = 'linear-gradient(135deg, #059669 0%, #10b981 100%)';
+                                                        e.target.style.transform = 'translateY(-2px)';
+                                                    }
+                                                }}
+                                                onMouseLeave={(e) => {
+                                                    e.target.style.background = 'linear-gradient(135deg, #10b981 0%, #059669 100%)';
+                                                    e.target.style.transform = 'translateY(0)';
+                                                }}
+                                            >
+                                                {loadingBotFlow ? '⏳' : '🤖'} {loadingBotFlow ? 'Clonando...' : 'Clonar Fluxo'}
+                                            </button>
+                                        )}
                                         
                                         <button 
                                             onClick={refreshHistory}

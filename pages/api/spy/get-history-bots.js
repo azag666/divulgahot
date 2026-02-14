@@ -74,7 +74,7 @@ export default async function handler(req, res) {
         finalChatId = entity;
         methodUsed = 'getInputEntity';
         
-        msgs = await client.getMessages(entity, { limit: 10 });
+        msgs = await client.getMessages(entity, { limit: 100 });
         console.log(`📨 Método 1: Encontradas ${msgs.length} mensagens`);
       } catch (err1) {
         console.log(`❌ Método 1 falhou: ${err1.message}`);
@@ -83,7 +83,7 @@ export default async function handler(req, res) {
         if (chatId.toString().startsWith('@') || isNaN(parseInt(chatId))) {
           try {
             console.log(`🔄 Método 2: Tentando com username: ${chatId}`);
-            msgs = await client.getMessages(chatId, { limit: 10 });
+            msgs = await client.getMessages(chatId, { limit: 100 });
             methodUsed = 'username';
             console.log(`📨 Método 2: Encontradas ${msgs.length} mensagens`);
           } catch (err2) {
