@@ -1093,7 +1093,13 @@ export default function AdminPanel() {
     setLoadingInboxHistory(true);
     
     try {
-      const res = await authenticatedFetch('/api/spy/get-history', {
+      // Verifica se é um bot baseado no diálogo selecionado
+      const isBot = selectedDialog?.type === 'Bot' || selectedDialog?.title?.includes('🤖');
+      const apiUrl = isBot ? '/api/spy/get-history-bots' : '/api/spy/get-history';
+      
+      console.log(`🤖 Usando API ${isBot ? 'get-history-bots' : 'get-history'} para ${isBot ? 'bot' : 'chat normal'}`);
+      
+      const res = await authenticatedFetch(apiUrl, {
         method: 'POST',
         body: JSON.stringify({ 
           phone: selectedInboxPhone, 
@@ -1109,7 +1115,10 @@ export default function AdminPanel() {
       
       if (data.success && data.history) {
         setInboxHistory(data.history);
-        addLog(`📝 Carregadas ${data.history.length} mensagens do diálogo`);
+        addLog(`📝 Carregadas ${data.history.length} mensagens do diálogo ${isBot ? '(bot)' : '(chat normal)'}`);
+        if (data.methodUsed) {
+          addLog(`🔧 Método usado: ${data.methodUsed}`);
+        }
         console.log(`✅ Sucesso: ${data.history.length} mensagens carregadas`);
       } else {
         const errorMsg = data.error || 'Erro desconhecido';
