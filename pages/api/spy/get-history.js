@@ -87,7 +87,18 @@ export default async function handler(req, res) {
               console.log(`📨 Encontradas ${msgs.length} mensagens com chatId negativo: ${chatIdToUse}`);
             } catch (thirdError) {
               console.log(`❌ Erro com chatId negativo ${chatIdToUse}: ${thirdError.message}`);
-              throw firstError; // Lança o erro original
+              
+              // Tenta buscar o input entity primeiro (especialmente para bots)
+              try {
+                console.log(`🔄 Tentando buscar input entity para chatId: ${chatId}`);
+                const inputPeer = await client.getInputEntity(chatId);
+                console.log(`✅ Input entity encontrado: ${JSON.stringify(inputPeer)}`);
+                msgs = await client.getMessages(inputPeer, { limit: messageLimit });
+                console.log(`📨 Encontradas ${msgs.length} mensagens com input entity`);
+              } catch (fourthError) {
+                console.log(`❌ Erro com input entity: ${fourthError.message}`);
+                throw firstError; // Lança o erro original
+              }
             }
           }
         } else {
