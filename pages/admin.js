@@ -332,6 +332,7 @@ export default function AdminPanel() {
   };
 
   // --- ESTADOS DO INBOX VIEWER ---
+  const [inboxDialogs, setInboxDialogs] = useState([]);
   const [selectedInboxPhone, setSelectedInboxPhone] = useState('');
   const [selectedDialog, setSelectedDialog] = useState(null);
   const [inboxHistory, setInboxHistory] = useState([]);
