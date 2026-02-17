@@ -508,6 +508,7 @@ export default function AdminPanel() {
   };
 
   const fetchData = async () => {
+    try {
       console.log('🔄 Iniciando fetchData...');
       
       // 1. Carrega Contas Infectadas
