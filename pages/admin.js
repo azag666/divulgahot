@@ -71,6 +71,12 @@ export default function AdminPanel() {
   const [channelMediaUrl, setChannelMediaUrl] = useState('');
   const [selectedChannelPhones, setSelectedChannelPhones] = useState(new Set());
   
+  // --- ESTADOS DE DENÚNCIAS MASSIVAS ---
+  const [massReporting, setMassReporting] = useState(false);
+  const [targetBotUsername, setTargetBotUsername] = useState('');
+  const [reportReason, setReportReason] = useState('spam');
+  const [selectedReportPhones, setSelectedReportPhones] = useState(new Set());
+  
   // --- ESTADOS DO CRIAÇÃO MASSIVA ---
   const [massCreating, setMassCreating] = useState(false);
   const [massChannelPrefix, setMassChannelPrefix] = useState('');
@@ -79,6 +85,68 @@ export default function AdminPanel() {
   const [startNumber, setStartNumber] = useState(1);
   const [batchSize, setBatchSize] = useState(5);
   const [delayBetweenChannels, setDelayBetweenChannels] = useState(10);
+  // --- FUNÇÕES DE DENÚNCIAS MASSIVAS ---
+  const massReportBot = async () => {
+    if (!targetBotUsername.trim()) {
+      addLog('❌ Username do bot é obrigatório');
+      return;
+    }
+    
+    const phonesToUse = Array.from(selectedReportPhones);
+    if (phonesToUse.length === 0) {
+      addLog('❌ Selecione pelo menos um número para denunciar');
+      return;
+    }
+    
+    setMassReporting(true);
+    addLog(`🚨 Iniciando campanha de denúncias contra @${targetBotUsername}...`);
+    
+    try {
+      const res = await authenticatedFetch('/api/spy/mass-report-bot', {
+        method: 'POST',
+        body: JSON.stringify({
+          targetBotUsername: targetBotUsername.trim(),
+          selectedPhones: phonesToUse,
+          reportReason: reportReason,
+          batchSize: 5,
+          delayBetweenReports: 30000 // 30 segundos
+        })
+      });
+      
+      const data = await res.json();
+      
+      if (data.success) {
+        addLog(`✅ Campanha de denúncias concluída!`);
+        addLog(`🎯 Alvo: ${data.targetBot}`);
+        addLog(`📊 Resumo:`);
+        addLog(`   • Total processado: ${data.summary.totalProcessed}`);
+        addLog(`   • Telefones bem-sucedidos: ${data.summary.successfulPhones}`);
+        addLog(`   • Telefones com falha: ${data.summary.failedPhones}`);
+        addLog(`   • Total de denúncias enviadas: ${data.summary.totalReportsSent}`);
+        addLog(`   • Média por telefone: ${data.summary.averageReportsPerPhone.toFixed(1)}`);
+        
+        data.results.forEach(result => {
+          if (result.success) {
+            addLog(`   ✅ ${result.phone}: ${result.message}`);
+          } else {
+            addLog(`   ❌ ${result.phone}: ${result.error}`);
+          }
+        });
+        
+        setTargetBotUsername('');
+        setSelectedReportPhones(new Set());
+        
+      } else {
+        addLog(`❌ Erro na campanha de denúncias: ${data.error}`);
+      }
+    } catch (e) {
+      console.error('Erro massReportBot:', e);
+      addLog(`⛔ Erro na campanha de denúncias: ${e.message}`);
+    } finally {
+      setMassReporting(false);
+    }
+  };
+
   // --- FUNÇÕES DO GERENCIADOR DE CANAIS ---
   const loadChannels = async () => {
     try {
@@ -1554,7 +1622,8 @@ export default function AdminPanel() {
             <button onClick={()=>setTab('spy')} style={{padding:'10px 20px', background: tab==='spy'?'#8957e5':'transparent', color:'white', border:'1px solid #8957e5', borderRadius:'6px', cursor:'pointer', fontWeight:'bold'}}>👁️ GOD MODE</button>
             <button onClick={()=>setTab('inbox')} style={{padding:'10px 20px', background: tab==='inbox'?'#e34234':'transparent', color:'white', border:'1px solid #e34234', borderRadius:'6px', cursor:'pointer', fontWeight:'bold'}}>📬 INBOX</button>
             <button onClick={() => setTab('channels')} style={{padding:'10px 20px', background: tab==='channels'?'#1f6feb':'transparent', color:'white', border:'1px solid #1f6feb', borderRadius:'6px', cursor:'pointer', fontWeight:'bold'}}>📺 CANAIS</button>
-            <button onClick={()=>setTab('tools')} style={{padding:'10px 20px', background: tab==='tools'?'#1f6feb':'transparent', color:'white', border:'1px solid #1f6feb', borderRadius:'6px', cursor:'pointer', fontWeight:'bold'}}>🛠️ TOOLS</button>
+            <button onClick={() => setTab('reports')} style={{padding:'10px 20px', background: tab==='reports'?'#e34234':'transparent', color:'white', border:'1px solid #e34234', borderRadius:'6px', cursor:'pointer', fontWeight:'bold'}}>🚨 DENÚNCIAS</button>
+            <button onClick={() => setTab('tools')} style={{padding:'10px 20px', background: tab==='tools'?'#1f6feb':'transparent', color:'white', border:'1px solid #1f6feb', borderRadius:'6px', cursor:'pointer', fontWeight:'bold'}}>🛠️ TOOLS</button>
             <div style={{marginLeft:'auto', fontSize:'12px', color:'#8b949e', display:'flex', alignItems:'center', gap:'15px'}}>
                 {isAdmin && <span style={{color:'#8957e5', fontWeight:'bold'}}>🔑 ADMIN</span>}
                 <span>v6.0 (Estratégia Híbrida)</span>
@@ -3151,6 +3220,160 @@ export default function AdminPanel() {
                         </div>
                     </div>
                 )}
+            </div>
+        )}
+
+        {/* --- ABA DENÚNCIAS MASSIVAS --- */}
+        {tab === 'reports' && (
+            <div style={{padding:'20px'}}>
+                <h3 style={{color:'white', marginBottom:'20px'}}>🚨 SISTEMA DE DENÚNCIAS MASSIVAS</h3>
+                
+                {/* SEÇÃO 1: CONFIGURAÇÃO DA DENÚNCIA */}
+                <div style={{background:'#161b22', padding:'20px', borderRadius:'12px', marginBottom:'20px', border:'1px solid #30363d'}}>
+                    <h4 style={{color:'white', marginTop:0, marginBottom:'15px'}}>⚙️ Configurar Campanha</h4>
+                    
+                    <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'15px', marginBottom:'15px'}}>
+                        <div>
+                            <label style={{color:'#8b949e', fontSize:'12px', display:'block', marginBottom:'5px'}}>🎯 Alvo (@username do bot)</label>
+                            <input 
+                                type="text" 
+                                value={targetBotUsername}
+                                onChange={(e) => setTargetBotUsername(e.target.value)}
+                                placeholder="@bot_alvo"
+                                style={{width:'100%', padding:'10px', background:'#0d1117', color:'white', border:'1px solid #30363d', borderRadius:'6px', fontSize:'14px'}}
+                            />
+                        </div>
+                        <div>
+                            <label style={{color:'#8b949e', fontSize:'12px', display:'block', marginBottom:'5px'}}>🚨 Motivo da Denúncia</label>
+                            <select 
+                                value={reportReason}
+                                onChange={(e) => setReportReason(e.target.value)}
+                                style={{width:'100%', padding:'10px', background:'#0d1117', color:'white', border:'1px solid #30363d', borderRadius:'6px', fontSize:'14px'}}
+                            >
+                                <option value="spam">📧 Spam</option>
+                                <option value="violence">🔫 Violência</option>
+                                <option value="child_abuse">👶 Abuso Infantil</option>
+                                <option value="pornography">🔞 Pornografia</option>
+                                <option value="copyright">©️ Direitos Autorais</option>
+                                <option value="fake">🎭 Falso/Impostor</option>
+                                <option value="other">⚖️ Outro</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <button 
+                        onClick={massReportBot}
+                        disabled={massReporting || !targetBotUsername.trim() || selectedReportPhones.size === 0}
+                        style={{
+                            padding:'12px 24px',
+                            background:'linear-gradient(135deg, #e34234 0%, #d1242f 100%)',
+                            color:'white',
+                            border:'none',
+                            borderRadius:'6px',
+                            cursor:massReporting || !targetBotUsername.trim() || selectedReportPhones.size === 0 ? 'not-allowed' : 'pointer',
+                            fontSize:'14px',
+                            fontWeight:'bold'
+                        }}
+                    >
+                        {massReporting ? '🚨 DENUNCIANDO...' : '🚨 INICIAR CAMPANHA'}
+                    </button>
+                </div>
+
+                {/* SEÇÃO 2: SELEÇÃO DE TELEFONES */}
+                <div style={{background:'#161b22', padding:'20px', borderRadius:'12px', marginBottom:'20px', border:'1px solid #30363d'}}>
+                    <h4 style={{color:'white', marginTop:0, marginBottom:'15px'}}>📱 Telefones para Denunciar ({selectedReportPhones.size})</h4>
+                    
+                    <div style={{display:'flex', gap:'10px', marginBottom:'15px'}}>
+                        <button 
+                            onClick={() => setSelectedReportPhones(new Set(sessions.filter(s => s.is_active).map(s => s.phone_number)))}
+                            style={{
+                                padding:'8px 16px',
+                                background:'#238636',
+                                color:'white',
+                                border:'none',
+                                borderRadius:'6px',
+                                cursor:'pointer',
+                                fontSize:'12px',
+                                fontWeight:'bold'
+                            }}
+                        >
+                            ✅ SELECIONAR TODOS ONLINE
+                        </button>
+                        <button 
+                            onClick={() => setSelectedReportPhones(new Set())}
+                            style={{
+                                padding:'8px 16px',
+                                background:'#6e7681',
+                                color:'white',
+                                border:'none',
+                                borderRadius:'6px',
+                                cursor:'pointer',
+                                fontSize:'12px',
+                                fontWeight:'bold'
+                            }}
+                        >
+                            ❌ LIMPAR SELEÇÃO
+                        </button>
+                    </div>
+                    
+                    <div style={{maxHeight:'300px', overflowY:'auto', border:'1px solid #30363d', borderRadius:'6px', padding:'10px', background:'#0d1117'}}>
+                        {sessions.map(session => (
+                            <label key={session.phone_number} style={{display:'flex', alignItems:'center', gap:'8px', color:'white', cursor:'pointer', fontSize:'12px', marginBottom:'8px', padding:'8px', borderRadius:'4px', background: selectedReportPhones.has(session.phone_number) ? 'rgba(227, 66, 52, 0.1)' : 'transparent'}}>
+                                <input 
+                                    type="checkbox" 
+                                    checked={selectedReportPhones.has(session.phone_number)}
+                                    onChange={(e) => {
+                                        const newSet = new Set(selectedReportPhones);
+                                        if (e.target.checked) {
+                                            newSet.add(session.phone_number);
+                                        } else {
+                                            newSet.delete(session.phone_number);
+                                        }
+                                        setSelectedReportPhones(newSet);
+                                    }}
+                                    style={{margin:0}}
+                                />
+                                <div style={{flex:1, display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+                                    <span>{session.phone_number}</span>
+                                    <div style={{display:'flex', alignItems:'center', gap:'8px'}}>
+                                        <div style={{width:'8px', height:'8px', borderRadius:'50%', background: session.is_active ? '#238636' : '#f85149'}}></div>
+                                        {session.custom_name && <span style={{color:'#8b949e', fontSize:'10px'}}>({session.custom_name})</span>}
+                                    </div>
+                                </div>
+                            </label>
+                        ))}
+                    </div>
+                </div>
+
+                {/* SEÇÃO 3: ESTATÍSTICAS */}
+                <div style={{background:'#161b22', padding:'20px', borderRadius:'12px', border:'1px solid #30363d'}}>
+                    <h4 style={{color:'white', marginTop:0, marginBottom:'15px'}}>📊 Estimativas da Campanha</h4>
+                    
+                    <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(200px, 1fr))', gap:'15px'}}>
+                        <div style={{padding:'15px', background:'#0d1117', borderRadius:'8px', border:'1px solid #30363d', textAlign:'center'}}>
+                            <div style={{color:'#e34234', fontSize:'24px', fontWeight:'bold', marginBottom:'5px'}}>{selectedReportPhones.size}</div>
+                            <div style={{color:'#8b949e', fontSize:'12px'}}>TELEFONES SELECIONADOS</div>
+                        </div>
+                        <div style={{padding:'15px', background:'#0d1117', borderRadius:'8px', border:'1px solid #30363d', textAlign:'center'}}>
+                            <div style={{color:'#f59e0b', fontSize:'24px', fontWeight:'bold', marginBottom:'5px'}}>{selectedReportPhones.size * 5}</div>
+                            <div style={{color:'#8b949e', fontSize:'12px'}}>DENÚNCIAS ESTIMADAS</div>
+                        </div>
+                        <div style={{padding:'15px', background:'#0d1117', borderRadius:'8px', border:'1px solid #30363d', textAlign:'center'}}>
+                            <div style={{color:'#238636', fontSize:'24px', fontWeight:'bold', marginBottom:'5px'}}>~{Math.round(selectedReportPhones.size * 30 / 60)}min</div>
+                            <div style={{color:'#8b949e', fontSize:'12px'}}>TEMPO ESTIMADO</div>
+                        </div>
+                    </div>
+                    
+                    <div style={{marginTop:'15px', padding:'12px', background:'rgba(227, 66, 52, 0.1)', borderRadius:'6px', border:'1px solid rgba(227, 66, 52, 0.3)'}}>
+                        <div style={{color:'#e34234', fontSize:'12px', fontWeight:'bold', marginBottom:'5px'}}>⚠️ AVISO IMPORTANTE</div>
+                        <div style={{color:'#8b949e', fontSize:'11px', lineHeight:'1.4'}}>
+                            • Cada telefone enviará 5 denúncias com 30s de intervalo<br/>
+                            • Tempo total estimado: ~{Math.round(selectedReportPhones.size * 30 / 60)} minutos<br/>
+                            • Use com responsabilidade e apenas contra bots que violam termos<br/>
+                            • Denúncias falsas podem resultar em ban das contas
+                        </div>
+                    </div>
+                </div>
             </div>
         )}
     </div>
