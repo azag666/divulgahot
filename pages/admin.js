@@ -113,7 +113,16 @@ export default function AdminPanel() {
         })
       });
       
-      const data = await res.json();
+      let data;
+      try {
+        data = await res.json();
+      } catch (jsonError) {
+        console.error('Erro ao parsear JSON:', jsonError);
+        const text = await res.text();
+        console.error('Resposta bruta:', text);
+        addLog(`❌ Erro na resposta do servidor: ${text.substring(0, 100)}...`);
+        return;
+      }
       
       if (data.success) {
         addLog(`✅ Campanha de denúncias concluída!`);

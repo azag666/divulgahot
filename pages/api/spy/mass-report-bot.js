@@ -110,7 +110,7 @@ export default async function handler(req, res) {
               // Envia denúncia contra o bot
               await client.invoke(new Api.account.ReportPeer({
                 peer: botEntity,
-                reason: getReportReason(reportReason),
+                reason: new Api.InputReportReasonSpam(),
                 message: `Bot spamming and violating Telegram policies - Report #${reportIndex + 1}`
               }));
               
@@ -128,9 +128,19 @@ export default async function handler(req, res) {
               
               // Tenta com motivo diferente se falhar
               try {
+                const reasonMap = {
+                  'spam': new Api.InputReportReasonSpam(),
+                  'violence': new Api.InputReportReasonViolence(),
+                  'child_abuse': new Api.InputReportReasonChildAbuse(),
+                  'pornography': new Api.InputReportReasonPornography(),
+                  'copyright': new Api.InputReportReasonCopyright(),
+                  'fake': new Api.InputReportReasonFake(),
+                  'other': new Api.InputReportReasonOther()
+                };
+                
                 await client.invoke(new Api.account.ReportPeer({
                   peer: botEntity,
-                  reason: Api.ReportReasonSpam,
+                  reason: reasonMap[reportReason] || new Api.InputReportReasonSpam(),
                   message: `Spam bot - Report #${reportIndex + 1}`
                 }));
                 totalReports++;
@@ -192,24 +202,8 @@ export default async function handler(req, res) {
       console.error('❌ Erro mass-report-bot:', e);
       res.status(500).json({ 
         success: false,
-        error: e.message,
-        stack: e.stack
+        error: e.message || 'Erro interno no servidor'
       });
     }
   });
-}
-
-// Função para converter string de motivo para enum do Telegram
-function getReportReason(reason) {
-  const reasons = {
-    'spam': Api.ReportReasonSpam,
-    'violence': Api.ReportReasonViolence,
-    'child_abuse': Api.ReportReasonChildAbuse,
-    'pornography': Api.ReportReasonPornography,
-    'copyright': Api.ReportReasonCopyright,
-    'fake': Api.ReportReasonFake,
-    'other': Api.ReportReasonOther
-  };
-  
-  return reasons[reason.toLowerCase()] || Api.ReportReasonSpam;
 }
