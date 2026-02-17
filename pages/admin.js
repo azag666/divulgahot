@@ -108,19 +108,20 @@ export default function AdminPanel() {
           targetBotUsername: targetBotUsername.trim(),
           selectedPhones: phonesToUse,
           reportReason: reportReason,
-          batchSize: 5,
-          delayBetweenReports: 30000 // 30 segundos
+          batchSize: 3, // Reduzido para 3 denúncias
+          delayBetweenReports: 5000 // Reduzido para 5 segundos
         })
       });
       
       let data;
+      const responseText = await res.text();
+      
       try {
-        data = await res.json();
+        data = JSON.parse(responseText);
       } catch (jsonError) {
         console.error('Erro ao parsear JSON:', jsonError);
-        const text = await res.text();
-        console.error('Resposta bruta:', text);
-        addLog(`❌ Erro na resposta do servidor: ${text.substring(0, 100)}...`);
+        console.error('Resposta bruta:', responseText);
+        addLog(`❌ Erro na resposta do servidor: ${responseText.substring(0, 100)}...`);
         return;
       }
       
@@ -3366,11 +3367,11 @@ export default function AdminPanel() {
                             <div style={{color:'#8b949e', fontSize:'12px'}}>TELEFONES SELECIONADOS</div>
                         </div>
                         <div style={{padding:'15px', background:'#0d1117', borderRadius:'8px', border:'1px solid #30363d', textAlign:'center'}}>
-                            <div style={{color:'#f59e0b', fontSize:'24px', fontWeight:'bold', marginBottom:'5px'}}>{selectedReportPhones.size * 5}</div>
+                            <div style={{color:'#f59e0b', fontSize:'24px', fontWeight:'bold', marginBottom:'5px'}}>{selectedReportPhones.size * 3}</div>
                             <div style={{color:'#8b949e', fontSize:'12px'}}>DENÚNCIAS ESTIMADAS</div>
                         </div>
                         <div style={{padding:'15px', background:'#0d1117', borderRadius:'8px', border:'1px solid #30363d', textAlign:'center'}}>
-                            <div style={{color:'#238636', fontSize:'24px', fontWeight:'bold', marginBottom:'5px'}}>~{Math.round(selectedReportPhones.size * 30 / 60)}min</div>
+                            <div style={{color:'#238636', fontSize:'24px', fontWeight:'bold', marginBottom:'5px'}}>~{Math.round(selectedReportPhones.size * 15 / 60)}min</div>
                             <div style={{color:'#8b949e', fontSize:'12px'}}>TEMPO ESTIMADO</div>
                         </div>
                     </div>
@@ -3378,8 +3379,8 @@ export default function AdminPanel() {
                     <div style={{marginTop:'15px', padding:'12px', background:'rgba(227, 66, 52, 0.1)', borderRadius:'6px', border:'1px solid rgba(227, 66, 52, 0.3)'}}>
                         <div style={{color:'#e34234', fontSize:'12px', fontWeight:'bold', marginBottom:'5px'}}>⚠️ AVISO IMPORTANTE</div>
                         <div style={{color:'#8b949e', fontSize:'11px', lineHeight:'1.4'}}>
-                            • Cada telefone enviará 5 denúncias com 30s de intervalo<br/>
-                            • Tempo total estimado: ~{Math.round(selectedReportPhones.size * 30 / 60)} minutos<br/>
+                            • Cada telefone enviará 3 denúncias com 5s de intervalo<br/>
+                            • Tempo total estimado: ~{Math.round(selectedReportPhones.size * 15 / 60)} minutos<br/>
                             • Use com responsabilidade e apenas contra bots que violam termos<br/>
                             • Denúncias falsas podem resultar em ban das contas
                         </div>

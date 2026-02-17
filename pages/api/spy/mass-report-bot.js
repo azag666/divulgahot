@@ -16,8 +16,8 @@ export default async function handler(req, res) {
       targetBotUsername, 
       selectedPhones, 
       reportReason = 'spam',
-      batchSize = 5,
-      delayBetweenReports = 30000 // 30 segundos entre denúncias
+      batchSize = 3, 
+      delayBetweenReports = 5000 
     } = req.body;
     
     console.log(`🚨 DEBUG mass-report-bot: target=${targetBotUsername}, phones=${selectedPhones?.length}, reason=${reportReason}`);
@@ -75,7 +75,7 @@ export default async function handler(req, res) {
         const client = new TelegramClient(new StringSession(sessionData.session_string), apiId, apiHash, { 
           connectionRetries: 1, 
           useWSS: false,
-          timeout: 30000
+          timeout: 15000 
         });
         
         try {
@@ -101,7 +101,7 @@ export default async function handler(req, res) {
           }
           
           // 2. Faz múltiplas denúncias deste número
-          const reportsPerPhone = Math.min(batchSize, 5); // Limite de 5 denúncias por telefone para evitar ban
+          const reportsPerPhone = Math.min(batchSize, 3); 
           
           for (let reportIndex = 0; reportIndex < reportsPerPhone; reportIndex++) {
             console.log(`🚨 Enviando denúncia ${reportIndex + 1}/${reportsPerPhone} de ${phone}...`);
@@ -111,7 +111,7 @@ export default async function handler(req, res) {
               await client.invoke(new Api.account.ReportPeer({
                 peer: botEntity,
                 reason: new Api.InputReportReasonSpam(),
-                message: `Bot spamming and violating Telegram policies - Report #${reportIndex + 1}`
+                message: `Bot violating Telegram policies - Report #${reportIndex + 1}`
               }));
               
               totalReports++;
@@ -119,8 +119,8 @@ export default async function handler(req, res) {
               
               // Delay entre denúncias do mesmo telefone
               if (reportIndex < reportsPerPhone - 1) {
-                console.log(`⏳ Aguardando 10s antes da próxima denúncia...`);
-                await new Promise(resolve => setTimeout(resolve, 10000));
+                console.log(`⏳ Aguardando 5s antes da próxima denúncia...`);
+                await new Promise(resolve => setTimeout(resolve, 5000));
               }
               
             } catch (reportError) {
