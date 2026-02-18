@@ -2,7 +2,7 @@ import { TelegramClient } from 'telegram';
 import { StringSession } from 'telegram/sessions';
 import { Api } from 'telegram/tl';
 import { createClient } from '@supabase/supabase-js';
-import authenticate from '../../../../middleware/authenticate.js';
+import authenticate from '../../../../../lib/middleware.js';
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 const apiId = parseInt(process.env.TELEGRAM_API_ID);
