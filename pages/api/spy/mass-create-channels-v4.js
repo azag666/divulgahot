@@ -181,11 +181,27 @@ export default async function handler(req, res) {
                 await client.invoke(
                   new Api.channels.InviteToChannel({
                     channel: channel,
-                    users: batch.map(lead => ({
-                      _: 'inputUser',
-                      userId: lead.chat_id, // Usar chat_id do lead
-                      accessHash: '0' // Placeholder, pode precisar ajustar
-                    }))
+                    users: batch.map(lead => {
+                      // Verificar se chat_id é número ou username
+                      const userId = lead.chat_id;
+                      if (typeof userId === 'number' && userId > 0) {
+                        return {
+                          _: 'inputUser',
+                          userId: userId,
+                          accessHash: '0'
+                        };
+                      } else if (typeof userId === 'string' && userId.includes('@')) {
+                        // Se for username, buscar o usuário primeiro
+                        return {
+                          _: 'inputUser',
+                          userId: userId,
+                          accessHash: '0'
+                        };
+                      } else {
+                        console.log(`⚠️ Chat_id inválido para lead ${lead.username}: ${userId}`);
+                        return null;
+                      }
+                    }).filter(Boolean) // Remover nulos
                   })
                 );
                 leadsAdded += batch.length;
@@ -200,16 +216,33 @@ export default async function handler(req, res) {
                 // Tentar adicionar individualmente se batch falhar
                 for (const lead of batch) {
                   try {
-                    await client.invoke(
-                      new Api.channels.InviteToChannel({
-                        channel: channel,
-                        users: [{
-                          _: 'inputUser',
-                          userId: lead.chat_id,
-                          accessHash: '0'
-                        }]
-                      })
-                    );
+                    const userId = lead.chat_id;
+                    if (typeof userId === 'number' && userId > 0) {
+                      await client.invoke(
+                        new Api.channels.InviteToChannel({
+                          channel: channel,
+                          users: [{
+                            _: 'inputUser',
+                            userId: userId,
+                            accessHash: '0'
+                          }]
+                        })
+                      );
+                    } else if (typeof userId === 'string' && userId.includes('@')) {
+                      await client.invoke(
+                        new Api.channels.InviteToChannel({
+                          channel: channel,
+                          users: [{
+                            _: 'inputUser',
+                            userId: userId,
+                            accessHash: '0'
+                          }]
+                        })
+                      );
+                    } else {
+                      console.log(`⚠️ Pulando lead ${lead.username} - chat_id inválido: ${userId}`);
+                      continue;
+                    }
                     leadsAdded++;
                     console.log(`✅ Adicionado lead individual: ${lead.username} (chat_id: ${lead.chat_id})`);
                   } catch (individualError) {
