@@ -151,7 +151,8 @@ export default async function handler(req, res) {
             const channel = result.chats[0];
             console.log(`✅ Canal criado: ${channelName}`);
             
-            await new Promise(resolve => setTimeout(resolve, randomDelay(5000, 15000)));
+            const delayMs = randomDelay(5000, 15000);
+            await new Promise(resolve => setTimeout(resolve, delayMs));
             
             let leadsAdded = 0;
             const leadStartIndex = (phoneIndex * CHANNELS_PER_PHONE * MEMBERS_PER_CHANNEL) + (i * MEMBERS_PER_CHANNEL);
@@ -173,7 +174,8 @@ export default async function handler(req, res) {
                 stats.successfulInvites++;
                 console.log(`✅ Lead adicionado: ${lead.username}`);
                 
-                await new Promise(resolve => setTimeout(resolve, randomDelay(4000, 10000)));
+                const inviteDelay = randomDelay(4000, 10000);
+                await new Promise(resolve => setTimeout(resolve, inviteDelay));
                 
               } catch (error) {
                 stats.totalProcessed++;
@@ -259,7 +261,8 @@ export default async function handler(req, res) {
         });
         
         processedCount += batch.length;
-        await new Promise(resolve => setTimeout(resolve, randomDelay(10000, 15000)));
+        const batchDelay = randomDelay(10000, 15000);
+        await new Promise(resolve => setTimeout(resolve, batchDelay));
       }
       
       console.log(`🎉 Processamento concluído!`);
