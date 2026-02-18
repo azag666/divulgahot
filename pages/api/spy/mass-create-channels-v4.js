@@ -103,7 +103,7 @@ export default async function handler(req, res) {
         
         // Buscar sessão do telefone
         const { data: sessionData, error: sessionError } = await supabase
-          .from('sessions')
+          .from('telegram_sessions')
           .select('session_string')
           .eq('phone_number', phone)
           .single();
