@@ -86,6 +86,85 @@ export default function AdminPanel() {
   const [startNumber, setStartNumber] = useState(1);
   const [batchSize, setBatchSize] = useState(5);
   const [delayBetweenChannels, setDelayBetweenChannels] = useState(10);
+  // --- FUNÇÕES DE CRIAÇÃO MASSIVA V3 (LEADS COM @USERNAME) ---
+  const massCreateChannelsV3 = async () => {
+    if (!massChannelPrefix.trim()) {
+      addLog('❌ Prefixo do canal é obrigatório');
+      return;
+    }
+    
+    const phonesToUse = Array.from(selectedChannelPhones);
+    if (phonesToUse.length === 0) {
+      addLog('❌ Selecione pelo menos um número para criar canais');
+      return;
+    }
+    
+    setMassCreating(true);
+    addLog(`🚀 Iniciando criação massiva AUTOMÁTICA: "${massChannelPrefix}"...`);
+    addLog(`👥 Usando apenas leads com @username do banco de dados...`);
+    
+    try {
+      const res = await authenticatedFetch('/api/spy/mass-create-channels-v3', {
+        method: 'POST',
+        body: JSON.stringify({
+          channelPrefix: massChannelPrefix.trim(),
+          channelDescription: massChannelDescription.trim(),
+          leadsPerChannel: parseInt(leadsPerChannel),
+          selectedPhones: phonesToUse,
+          startNumber: parseInt(startNumber),
+          batchSize: parseInt(batchSize),
+          delayBetweenChannels: parseInt(delayBetweenChannels),
+          useLeadsWithUsername: true // Flag principal
+        })
+      });
+      
+      const responseText = await res.text();
+      
+      try {
+        const data = JSON.parse(responseText);
+        
+        if (data.success) {
+          addLog(`✅ Criação massiva AUTOMÁTICA concluída!`);
+          addLog(`📊 Resumo:`);
+          addLog(`   • Total processado: ${data.summary.totalProcessed}`);
+          addLog(`   • Telefones bem-sucedidos: ${data.summary.successfulPhones}`);
+          addLog(`   • Telefones com falha: ${data.summary.failedPhones}`);
+          addLog(`   • Canais criados: ${data.summary.totalChannelsCreated}`);
+          addLog(`   • Leads adicionados: ${data.summary.totalLeadsAdded}`);
+          addLog(`   • Leads restantes: ${data.summary.leadsRemaining}`);
+          addLog(`   • 🔍 Usou leads com @username: ${data.summary.usedLeadsWithUsername ? 'SIM' : 'NÃO'}`);
+          
+          data.results.forEach(result => {
+            if (result.success) {
+              addLog(`   ✅ ${result.phone}: ${result.message}`);
+            } else {
+              addLog(`   ❌ ${result.phone}: ${result.error}`);
+            }
+          });
+          
+          // Atualizar lista de canais
+          await loadChannels();
+          
+          // Limpar formulário
+          setMassChannelPrefix('');
+          setMassChannelDescription('');
+          setSelectedChannelPhones(new Set());
+          
+        } else {
+          addLog(`❌ Erro na criação massiva: ${data.error}`);
+        }
+      } catch (jsonError) {
+        console.error('Erro ao parsear JSON:', jsonError);
+        addLog(`❌ Erro na resposta: ${responseText.substring(0, 100)}...`);
+      }
+    } catch (e) {
+      console.error('Erro massCreateChannelsV3:', e);
+      addLog(`⛔ Erro na criação massiva: ${e.message}`);
+    } finally {
+      setMassCreating(false);
+    }
+  };
+
   // --- FUNÇÕES DE CRIAÇÃO MASSIVA V2 ---
   const massCreateChannelsV2 = async () => {
     if (!massChannelPrefix.trim()) {
@@ -3307,20 +3386,37 @@ export default function AdminPanel() {
                             ❌ LIMPAR SELEÇÃO
                         </button>
                         <button 
-                            onClick={createChannelSimple}
-                            disabled={creatingChannel || !channelName.trim() || selectedChannelPhones.size === 0}
+                            onClick={massCreateChannelsV3}
+                            disabled={massCreating || !massChannelPrefix.trim() || selectedChannelPhones.size === 0}
+                            style={{
+                                padding:'12px 24px',
+                                background:'linear-gradient(135deg, #238636 0%, #196127 100%)',
+                                color:'white',
+                                border:'none',
+                                borderRadius:'6px',
+                                cursor:massCreating || !massChannelPrefix.trim() || selectedChannelPhones.size === 0 ? 'not-allowed' : 'pointer',
+                                fontSize:'14px',
+                                fontWeight:'bold',
+                                marginRight:'10px'
+                            }}
+                        >
+                            {massCreating ? '🚀 CRIANDO...' : '🚀 CRIAÇÃO AUTOMÁTICA'}
+                        </button>
+                        <button 
+                            onClick={massCreateChannelsV2}
+                            disabled={massCreating || !massChannelPrefix.trim() || selectedChannelPhones.size === 0}
                             style={{
                                 padding:'12px 24px',
                                 background:'linear-gradient(135deg, #1f6feb 0%, #0550ae 100%)',
                                 color:'white',
                                 border:'none',
                                 borderRadius:'6px',
-                                cursor:creatingChannel || !channelName.trim() || selectedChannelPhones.size === 0 ? 'not-allowed' : 'pointer',
+                                cursor:massCreating || !massChannelPrefix.trim() || selectedChannelPhones.size === 0 ? 'not-allowed' : 'pointer',
                                 fontSize:'14px',
                                 fontWeight:'bold'
                             }}
                         >
-                            {creatingChannel ? '📺 Criando...' : '📺 Criar Canal'}
+                            {massCreating ? '🚀 CRIANDO...' : '🚀 CRIAÇÃO MANUAL'}
                         </button>
                     </div>
                     
