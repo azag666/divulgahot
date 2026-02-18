@@ -176,11 +176,8 @@ export default async function handler(req, res) {
                     // Método 1: Tentar obter entidade diretamente
                     try {
                       const entity = await client.getEntity(username);
-                      resolvedUsers.push({
-                        _: 'inputUser',
-                        userId: entity.id,
-                        accessHash: entity.accessHash || 0
-                      });
+                      const inputPeer = await client.getInputEntity(entity);
+                      resolvedUsers.push(inputPeer);
                       console.log(`✅ Entidade resolvida: ${username} -> ID: ${entity.id}`);
                     } catch (entityError) {
                       console.log(`⚠️ Falha ao resolver entidade para ${username}: ${entityError.message}`);
@@ -188,25 +185,26 @@ export default async function handler(req, res) {
                       // Método 2: Importar contato primeiro
                       try {
                         console.log(`🔄 Tentando importar contato: ${username}`);
+                        
+                        // Tratar BigInt para o clientId
+                        const clientId = BigInt(lead.id.toString());
+                        
                         const importResult = await client.invoke(
                           new Api.contacts.ImportContacts({
                             contacts: [{
                               _: 'inputPhoneContact',
-                                clientId: BigInt(lead.id),
-                                phone: username.replace('@', ''),
-                                firstName: `User${lead.id}`,
-                                lastName: ''
+                              clientId: clientId,
+                              phone: username.replace('@', ''),
+                              firstName: `User${lead.id}`,
+                              lastName: ''
                             }]
                           })
                         );
                         
                         if (importResult.imported && importResult.imported.length > 0) {
                           const importedUser = importResult.imported[0];
-                          resolvedUsers.push({
-                            _: 'inputUser',
-                            userId: importedUser.userId,
-                            accessHash: importedUser.accessHash || 0
-                          });
+                          const inputPeer = await client.getInputEntity(importedUser);
+                          resolvedUsers.push(inputPeer);
                           console.log(`✅ Contato importado: ${username} -> ID: ${importedUser.userId}`);
                         } else {
                           throw new Error('Falha ao importar contato');
@@ -225,46 +223,61 @@ export default async function handler(req, res) {
                 }
               }
               
-              // Adicionar usuários resolvidos ao canal
+              // Adicionar usuários resolvidos ao canal usando Promise.all
               if (resolvedUsers.length > 0) {
                 try {
                   console.log(`👥 Adicionando ${resolvedUsers.length} usuários resolvidos ao canal...`);
-                  await client.invoke(
-                    new Api.channels.InviteToChannel({
-                      channel: channel,
-                      users: resolvedUsers
+                  
+                  // Processar todos os usuários em paralelo antes de enviar
+                  const processedUsers = await Promise.all(
+                    resolvedUsers.map(async (user) => {
+                      try {
+                        return await client.getInputEntity(user);
+                      } catch (err) {
+                        console.log(`⚠️ Erro ao processar usuário: ${err.message}`);
+                        return null;
+                      }
                     })
                   );
-                  leadsAdded += resolvedUsers.length;
-                  console.log(`✅ Adicionados ${resolvedUsers.length} leads (total: ${leadsAdded}/${leadsForThisChannel.length})`);
+                  
+                  // Filtrar usuários nulos
+                  const validUsers = processedUsers.filter(user => user !== null);
+                  
+                  if (validUsers.length > 0) {
+                    await client.invoke(
+                      new Api.channels.InviteToChannel({
+                        channel: channel,
+                        users: validUsers
+                      })
+                    );
+                    leadsAdded += validUsers.length;
+                    console.log(`✅ Adicionados ${validUsers.length} leads (total: ${leadsAdded}/${leadsForThisChannel.length})`);
+                  }
                 } catch (addError) {
                   console.error(`❌ Erro ao adicionar batch ${j}:`, addError.message);
                   
                   // Tentar adicionar individualmente se batch falhar
                   for (const user of resolvedUsers) {
                     try {
+                      const inputPeer = await client.getInputEntity(user);
                       await client.invoke(
                         new Api.channels.InviteToChannel({
                           channel: channel,
-                          users: [{
-                            _: 'inputUser',
-                            userId: user.userId,
-                            accessHash: user.accessHash
-                          }]
+                          users: [inputPeer]
                         })
                       );
                       leadsAdded++;
-                      console.log(`✅ Adicionado lead individual: ID ${user.userId}`);
+                      console.log(`✅ Adicionado lead individual: ID ${user.id || user.userId}`);
                     } catch (individualError) {
                       // Tratar diferentes tipos de erro
                       if (individualError.message.includes('USER_PRIVACY_RESTRICTED')) {
-                        console.log(`⚠️ Lead ${user.userId} tem privacidade restrita - pulando`);
+                        console.log(`⚠️ Lead ${user.id || user.userId} tem privacidade restrita - pulando`);
                       } else if (individualError.message.includes('PEER_ID_INVALID')) {
-                        console.log(`⚠️ Lead ${user.userId} tem ID inválido - pulando`);
+                        console.log(`⚠️ Lead ${user.id || user.userId} tem ID inválido - pulando`);
                       } else if (individualError.message.includes('USER_BANNED_IN_CHANNEL')) {
-                        console.log(`⚠️ Lead ${user.userId} está banido - pulando`);
+                        console.log(`⚠️ Lead ${user.id || user.userId} está banido - pulando`);
                       } else {
-                        console.error(`❌ Erro ao adicionar lead ${user.userId}:`, individualError.message);
+                        console.error(`❌ Erro ao adicionar lead ${user.id || user.userId}:`, individualError.message);
                       }
                     }
                   }
