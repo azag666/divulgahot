@@ -3559,7 +3559,6 @@ export default function AdminPanel() {
                                         </div>
                                         <div style={{width:'8px', height:'8px', borderRadius:'50%', background: channel.status === 'broadcast_sent' ? '#238636' : channel.status === 'members_added' ? '#f59e0b' : '#6e7681'}}></div>
                                     </div>
-                                    </div>
                                     <div style={{color:'#8b949e', fontSize:'12px', marginBottom:'8px'}}>
                                         👥 Membros: {channel.total_members || 0}
                                     </div>
