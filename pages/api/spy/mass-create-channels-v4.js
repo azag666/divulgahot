@@ -174,13 +174,14 @@ export default async function handler(req, res) {
                     users: batch.map(lead => {
                       const username = lead.username;
                       if (username && username.includes('@')) {
+                        console.log(`🔍 DEBUG - Tentando adicionar: ${username}`);
                         return {
                           _: 'inputUser',
                           userId: username,
                           accessHash: '0'
                         };
                       } else {
-                        console.log(`⚠️ Username inválido para lead ${lead.username}: ${username}`);
+                        console.log(`⚠️ Username inválido para lead ID=${lead.id}: ${username}`);
                         return null;
                       }
                     }).filter(Boolean)
