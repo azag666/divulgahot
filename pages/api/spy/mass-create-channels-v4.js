@@ -177,7 +177,7 @@ export default async function handler(req, res) {
                     try {
                       const entity = await client.getEntity(username);
                       resolvedUsers.push({
-                        _: 'inputPeerUser',
+                        _: 'inputUser',
                         userId: entity.id,
                         accessHash: entity.accessHash || 0
                       });
@@ -203,7 +203,7 @@ export default async function handler(req, res) {
                         if (importResult.imported && importResult.imported.length > 0) {
                           const importedUser = importResult.imported[0];
                           resolvedUsers.push({
-                            _: 'inputPeerUser',
+                            _: 'inputUser',
                             userId: importedUser.userId,
                             accessHash: importedUser.accessHash || 0
                           });
@@ -246,7 +246,11 @@ export default async function handler(req, res) {
                       await client.invoke(
                         new Api.channels.InviteToChannel({
                           channel: channel,
-                          users: [user]
+                          users: [{
+                            _: 'inputUser',
+                            userId: user.userId,
+                            accessHash: user.accessHash
+                          }]
                         })
                       );
                       leadsAdded++;
