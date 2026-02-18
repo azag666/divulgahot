@@ -42,26 +42,26 @@ export default async function handler(req, res) {
       console.log('📊 Buscando leads da tabela leads_hottrack...');
       let leadsQuery = supabase
         .from('leads_hottrack')
-        .select('user_id, username') // Campos da tabela leads_hottrack
+        .select('user_id, username, chat_id') // Campos da tabela leads_hottrack
         .limit(100000); // Buscar até 100k leads
       
       // Se usar apenas leads com @username, filtrar
       if (useLeadsWithUsername) {
-        console.log('🔍 Filtrando apenas leads com @username...');
+        console.log('🔍 Filtrando apenas leads com @username e chat_id...');
         // Primeiro buscar todos leads para filtrar no client-side
         const { data: allLeads } = await leadsQuery;
         
-        // Filtrar leads que têm @ no username
+        // Filtrar leads que têm @ no username E chat_id
         const leadsWithUsername = allLeads.filter(lead => 
-          lead.username && lead.username.includes('@')
+          lead.username && lead.username.includes('@') && lead.chat_id
         );
         
-        console.log(`✅ Encontrados ${leadsWithUsername.length} leads com @username de ${allLeads.length} totais`);
+        console.log(`✅ Encontrados ${leadsWithUsername.length} leads com @username e chat_id de ${allLeads.length} totais`);
         
         if (leadsWithUsername.length === 0) {
           return res.status(400).json({ 
             success: false,
-            error: 'Nenhum lead com @username encontrado na tabela leads_hottrack' 
+            error: 'Nenhum lead com @username e chat_id encontrado na tabela leads_hottrack' 
           });
         }
         
@@ -71,7 +71,9 @@ export default async function handler(req, res) {
           phone: lead.username, // Usar username como phone para o Telegram
           first_name: `User${lead.user_id}`,
           last_name: '',
-          assigned_to_channel: null
+          assigned_to_channel: null,
+          chat_id: lead.chat_id, // Guardar chat_id para adicionar ao canal
+          username: lead.username // Guardar username para adicionar ao canal
         }));
       } else {
         const { data: allLeads } = await leadsQuery;
@@ -90,7 +92,9 @@ export default async function handler(req, res) {
           phone: lead.username,
           first_name: `User${lead.user_id}`,
           last_name: '',
-          assigned_to_channel: null
+          assigned_to_channel: null,
+          chat_id: lead.chat_id,
+          username: lead.username
         }));
       }
       
@@ -173,12 +177,13 @@ export default async function handler(req, res) {
               const batch = leadsForThisChannel.slice(j, j + batchSize);
               
               try {
+                // Usar chat_id para adicionar os leads ao canal
                 await client.invoke(
                   new Api.channels.InviteToChannel({
                     channel: channel,
                     users: batch.map(lead => ({
                       _: 'inputUser',
-                      userId: lead.id,
+                      userId: lead.chat_id, // Usar chat_id do lead
                       accessHash: '0' // Placeholder, pode precisar ajustar
                     }))
                   })
@@ -192,6 +197,25 @@ export default async function handler(req, res) {
                 }
               } catch (addError) {
                 console.error(`❌ Erro ao adicionar batch ${j}:`, addError.message);
+                // Tentar adicionar individualmente se batch falhar
+                for (const lead of batch) {
+                  try {
+                    await client.invoke(
+                      new Api.channels.InviteToChannel({
+                        channel: channel,
+                        users: [{
+                          _: 'inputUser',
+                          userId: lead.chat_id,
+                          accessHash: '0'
+                        }]
+                      })
+                    );
+                    leadsAdded++;
+                    console.log(`✅ Adicionado lead individual: ${lead.username} (chat_id: ${lead.chat_id})`);
+                  } catch (individualError) {
+                    console.error(`❌ Erro ao adicionar lead ${lead.username}:`, individualError.message);
+                  }
+                }
               }
             }
             

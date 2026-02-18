@@ -11,7 +11,7 @@ export default async function handler(req, res) {
     // Verificar se tabela leads_hottrack existe e buscar dados
     const { data: leads, error: leadsError } = await supabase
       .from('leads_hottrack')
-      .select('user_id, username')
+      .select('user_id, username, chat_id')
       .limit(100); // Limitar para teste
     
     if (leadsError) {
@@ -25,12 +25,12 @@ export default async function handler(req, res) {
     
     console.log(`📊 Total de leads encontrados (primeiros 100): ${leads.length}`);
     
-    // Filtrar leads com @username
+    // Filtrar leads com @username e chat_id
     const leadsWithUsername = leads.filter(lead => 
-      lead.username && lead.username.includes('@')
+      lead.username && lead.username.includes('@') && lead.chat_id
     );
     
-    console.log(`🔍 Leads com @username (primeiros 100): ${leadsWithUsername.length}`);
+    console.log(`🔍 Leads com @username e chat_id (primeiros 100): ${leadsWithUsername.length}`);
     
     // Contar total de leads (sem limite)
     const { count: totalCount, error: countError } = await supabase
@@ -42,11 +42,12 @@ export default async function handler(req, res) {
       console.error('❌ Erro ao contar total:', countError);
     }
     
-    // Contar leads com @username (amostra)
+    // Contar leads com @username e chat_id (amostra)
     const { count: usernameCount, error: usernameCountError } = await supabase
       .from('leads_hottrack')
       .select('*', { count: 'exact', head: true })
-      .like('username', '@%');
+      .like('username', '@%')
+      .not('chat_id', 'is', null);
     
     let totalWithUsername = usernameCount || 0;
     if (usernameCountError) {
@@ -56,7 +57,7 @@ export default async function handler(req, res) {
     // Mostrar exemplos
     console.log('📝 Exemplos de leads:');
     leads.slice(0, 10).forEach(lead => {
-      console.log(`  - ID: ${lead.user_id}, Username: ${lead.username}`);
+      console.log(`  - ID: ${lead.user_id}, Username: ${lead.username}, Chat_ID: ${lead.chat_id}`);
     });
     
     res.json({ 
@@ -65,8 +66,8 @@ export default async function handler(req, res) {
       leadsWithUsername: totalWithUsername,
       sampleLeads: leads.slice(0, 20),
       message: totalWithUsername === 0 
-        ? 'Nenhum lead com @username encontrado na tabela leads_hottrack'
-        : `Encontrados ${totalWithUsername} leads com @username de ${totalLeads} totais na tabela leads_hottrack`
+        ? 'Nenhum lead com @username e chat_id encontrado na tabela leads_hottrack'
+        : `Encontrados ${totalWithUsername} leads com @username e chat_id de ${totalLeads} totais na tabela leads_hottrack`
     });
 
   } catch (e) {
