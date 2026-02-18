@@ -101,10 +101,10 @@ export default function AdminPanel() {
     
     setMassCreating(true);
     addLog(`🚀 Iniciando criação massiva AUTOMÁTICA: "${massChannelPrefix}"...`);
-    addLog(`👥 Usando apenas leads com @username do banco de dados...`);
+    addLog(`👥 Usando leads da tabela leads_hottrack (100k+ leads)...`);
     
     try {
-      const res = await authenticatedFetch('/api/spy/mass-create-channels-v3', {
+      const res = await authenticatedFetch('/api/spy/mass-create-channels-v4', {
         method: 'POST',
         body: JSON.stringify({
           channelPrefix: massChannelPrefix.trim(),
@@ -126,17 +126,18 @@ export default function AdminPanel() {
         if (data.success) {
           addLog(`✅ Criação massiva AUTOMÁTICA concluída!`);
           addLog(`📊 Resumo:`);
-          addLog(`   • Total processado: ${data.summary.totalProcessed}`);
-          addLog(`   • Telefones bem-sucedidos: ${data.summary.successfulPhones}`);
-          addLog(`   • Telefones com falha: ${data.summary.failedPhones}`);
+          addLog(`   • Total de telefones: ${data.summary.totalPhones}`);
           addLog(`   • Canais criados: ${data.summary.totalChannelsCreated}`);
           addLog(`   • Leads adicionados: ${data.summary.totalLeadsAdded}`);
-          addLog(`   • Leads restantes: ${data.summary.leadsRemaining}`);
-          addLog(`   • 🔍 Usou leads com @username: ${data.summary.usedLeadsWithUsername ? 'SIM' : 'NÃO'}`);
+          addLog(`   • Telefones com falha: ${data.summary.totalFailed}`);
+          addLog(`   • 🔍 Usou leads_hottrack: SIM`);
           
           data.results.forEach(result => {
             if (result.success) {
-              addLog(`   ✅ ${result.phone}: ${result.message}`);
+              addLog(`   ✅ ${result.phone}: ${result.channels.length} canais criados`);
+              result.channels.forEach(channel => {
+                addLog(`      📺 ${channel.channel_name}: ${channel.leads_added} leads`);
+              });
             } else {
               addLog(`   ❌ ${result.phone}: ${result.error}`);
             }
@@ -3397,10 +3398,11 @@ export default function AdminPanel() {
                                 cursor:massCreating || !massChannelPrefix.trim() || selectedChannelPhones.size === 0 ? 'not-allowed' : 'pointer',
                                 fontSize:'14px',
                                 fontWeight:'bold',
-                                marginRight:'10px'
+                                marginRight:'10px',
+                                opacity: (massCreating || !massChannelPrefix.trim() || selectedChannelPhones.size === 0) ? 0.6 : 1
                             }}
                         >
-                            {massCreating ? '🚀 CRIANDO...' : '🚀 CRIAÇÃO AUTOMÁTICA'}
+                            {massCreating ? '⏳ CRIANDO...' : '🚀 CRIAÇÃO AUTOMÁTICA (leads_hottrack)'}
                         </button>
                         <button 
                             onClick={massCreateChannelsV2}
