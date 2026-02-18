@@ -60,9 +60,12 @@ export default async function handler(req, res) {
       const leadsWithUsername = allLeads.map(lead => {
         let username = lead.username;
         
-        // Se não tiver @, adicionar automaticamente
-        if (username && !username.startsWith('@')) {
-          username = `@${username}`;
+        // Limpar string e adicionar @ se não tiver
+        if (username) {
+          username = username.toString().trim();
+          if (!username.startsWith('@')) {
+            username = `@${username}`;
+          }
         }
         
         return {
@@ -158,62 +161,115 @@ export default async function handler(req, res) {
               console.log(`  ${idx + 1}: ID=${lead.id}, Username=${lead.username}, Chat_ID=${lead.chat_id}`);
             });
             
-            const batchSize = 50;
+            const batchSize = 20; 
             for (let j = 0; j < leadsForThisChannel.length; j += batchSize) {
               const batch = leadsForThisChannel.slice(j, j + batchSize);
+              const resolvedUsers = [];
               
-              try {
-                await client.invoke(
-                  new Api.channels.InviteToChannel({
-                    channel: channel,
-                    users: batch.map(lead => {
-                      const username = lead.username;
-                      if (username && username.includes('@')) {
-                        console.log(`🔍 DEBUG - Tentando adicionar: ${username}`);
-                        // Usar formato correto para username
-                        return {
-                          _: 'inputPeerUser',
-                          userId: username,
-                          accessHash: 0
-                        };
-                      } else {
-                        console.log(`⚠️ Username inválido para lead ID=${lead.id}: ${username}`);
-                        return null;
+              // Resolver entidades para cada lead
+              for (const lead of batch) {
+                try {
+                  const username = lead.username;
+                  if (username && username.includes('@')) {
+                    console.log(`🔍 DEBUG - Resolvendo entidade: ${username}`);
+                    
+                    // Método 1: Tentar obter entidade diretamente
+                    try {
+                      const entity = await client.getEntity(username);
+                      resolvedUsers.push({
+                        _: 'inputPeerUser',
+                        userId: entity.id,
+                        accessHash: entity.accessHash || 0
+                      });
+                      console.log(`✅ Entidade resolvida: ${username} -> ID: ${entity.id}`);
+                    } catch (entityError) {
+                      console.log(`⚠️ Falha ao resolver entidade para ${username}: ${entityError.message}`);
+                      
+                      // Método 2: Importar contato primeiro
+                      try {
+                        console.log(`🔄 Tentando importar contato: ${username}`);
+                        const importResult = await client.invoke(
+                          new Api.contacts.ImportContacts({
+                            contacts: [{
+                              _: 'inputPhoneContact',
+                                clientId: BigInt(lead.id),
+                                phone: username.replace('@', ''),
+                                firstName: `User${lead.id}`,
+                                lastName: ''
+                            }]
+                          })
+                        );
+                        
+                        if (importResult.imported && importResult.imported.length > 0) {
+                          const importedUser = importResult.imported[0];
+                          resolvedUsers.push({
+                            _: 'inputPeerUser',
+                            userId: importedUser.userId,
+                            accessHash: importedUser.accessHash || 0
+                          });
+                          console.log(`✅ Contato importado: ${username} -> ID: ${importedUser.userId}`);
+                        } else {
+                          throw new Error('Falha ao importar contato');
+                        }
+                      } catch (importError) {
+                        console.log(`❌ Falha ao importar contato ${username}: ${importError.message}`);
+                        // Pular este lead e continuar com o próximo
+                        continue;
                       }
-                    }).filter(Boolean)
-                  })
-                );
-                leadsAdded += batch.length;
-                console.log(`✅ Adicionados ${batch.length} leads (total: ${leadsAdded}/${leadsForThisChannel.length})`);
-                
-                if (j + batchSize < leadsForThisChannel.length) {
-                  await new Promise(resolve => setTimeout(resolve, 2000));
+                    }
+                  }
+                } catch (error) {
+                  console.error(`❌ Erro ao processar lead ${lead.username}:`, error.message);
+                  // Continuar para o próximo lead
+                  continue;
                 }
-              } catch (addError) {
-                console.error(`❌ Erro ao adicionar batch ${j}:`, addError.message);
-                for (const lead of batch) {
-                  try {
-                    const username = lead.username;
-                    if (username && username.includes('@')) {
+              }
+              
+              // Adicionar usuários resolvidos ao canal
+              if (resolvedUsers.length > 0) {
+                try {
+                  console.log(`👥 Adicionando ${resolvedUsers.length} usuários resolvidos ao canal...`);
+                  await client.invoke(
+                    new Api.channels.InviteToChannel({
+                      channel: channel,
+                      users: resolvedUsers
+                    })
+                  );
+                  leadsAdded += resolvedUsers.length;
+                  console.log(`✅ Adicionados ${resolvedUsers.length} leads (total: ${leadsAdded}/${leadsForThisChannel.length})`);
+                } catch (addError) {
+                  console.error(`❌ Erro ao adicionar batch ${j}:`, addError.message);
+                  
+                  // Tentar adicionar individualmente se batch falhar
+                  for (const user of resolvedUsers) {
+                    try {
                       await client.invoke(
                         new Api.channels.InviteToChannel({
                           channel: channel,
-                          users: [{
-                            _: 'inputPeerUser',
-                            userId: username,
-                            accessHash: 0
-                          }]
+                          users: [user]
                         })
                       );
                       leadsAdded++;
-                      console.log(`✅ Adicionado lead individual: ${username}`);
-                    } else {
-                      console.log(`⚠️ Username inválido para lead ID=${lead.id}: ${username}`);
+                      console.log(`✅ Adicionado lead individual: ID ${user.userId}`);
+                    } catch (individualError) {
+                      // Tratar diferentes tipos de erro
+                      if (individualError.message.includes('USER_PRIVACY_RESTRICTED')) {
+                        console.log(`⚠️ Lead ${user.userId} tem privacidade restrita - pulando`);
+                      } else if (individualError.message.includes('PEER_ID_INVALID')) {
+                        console.log(`⚠️ Lead ${user.userId} tem ID inválido - pulando`);
+                      } else if (individualError.message.includes('USER_BANNED_IN_CHANNEL')) {
+                        console.log(`⚠️ Lead ${user.userId} está banido - pulando`);
+                      } else {
+                        console.error(`❌ Erro ao adicionar lead ${user.userId}:`, individualError.message);
+                      }
                     }
-                  } catch (individualError) {
-                    console.error(`❌ Erro ao adicionar lead ${username}:`, individualError.message);
                   }
                 }
+              }
+              
+              // Delay entre batches
+              if (j + batchSize < leadsForThisChannel.length) {
+                await new Promise(resolve => setTimeout(resolve, 3000)); 
               }
             }
             
