@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-const { authenticate } = require('../../../../lib/middleware');
+const { authenticate } = require('../../../lib/middleware');
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 

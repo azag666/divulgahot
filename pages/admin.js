@@ -3557,7 +3557,7 @@ export default function AdminPanel() {
                                             <div style={{color:'white', fontSize:'14px', fontWeight:'bold', marginBottom:'5px'}}>{channel.channel_name}</div>
                                             <div style={{color:'#8b949e', fontSize:'11px', marginBottom:'5px'}}>{channel.channel_description}</div>
                                         </div>
-                                        <div style={{width:'8px', height:'8px', borderRadius:'50%', background: channel.status === 'broadcast_sent' ? '#238636' : channel.status === 'members_added' ? '#f59e0b' : '#6e7681'}}></div>
+                                        <div style={{width:'8px', height:'8px', borderRadius:'50%', background: channel.status === "broadcast_sent" ? "#238636" : channel.status === "members_added" ? "#f59e0b" : "#6e7681"}}></div>
                                     </div>
                                     </div>
                                     <div style={{color:'#8b949e', fontSize:'12px', marginBottom:'8px'}}>
