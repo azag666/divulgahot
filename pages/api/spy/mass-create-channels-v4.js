@@ -19,7 +19,7 @@ export default async function handler(req, res) {
       startNumber = 1,
       batchSize = 3,
       delayBetweenChannels = 5000,
-      useLeadsWithUsername = true // Nova flag para usar apenas leads com @
+      useLeadsWithUsername = true
     } = req.body;
     
     console.log(`🚀 DEBUG mass-create-channels-v4: prefix=${channelPrefix}, phones=${selectedPhones?.length}, useLeadsWithUsername=${useLeadsWithUsername}`);
@@ -38,20 +38,16 @@ export default async function handler(req, res) {
     let allCreatedChannels = [];
     
     try {
-      // 1. Buscar leads da tabela leads_hottrack
       console.log('📊 Buscando leads da tabela leads_hottrack...');
       let leadsQuery = supabase
         .from('leads_hottrack')
-        .select('user_id, username, chat_id') // Campos da tabela leads_hottrack
-        .limit(100000); // Buscar até 100k leads
+        .select('user_id, username, chat_id')
+        .limit(100000);
       
-      // Se usar apenas leads com @username, filtrar
       if (useLeadsWithUsername) {
         console.log('🔍 Filtrando apenas leads com @username...');
-        // Primeiro buscar todos leads para filtrar no client-side
         const { data: allLeads } = await leadsQuery;
         
-        // Filtrar leads que têm @ no username
         const leadsWithUsername = allLeads.filter(lead => 
           lead.username && lead.username.includes('@')
         );
@@ -65,15 +61,14 @@ export default async function handler(req, res) {
           });
         }
         
-        // Converter para formato esperado pelo sistema
         var leads = leadsWithUsername.map(lead => ({
           id: lead.user_id,
-          phone: lead.username, // Usar username como phone para o Telegram
+          phone: lead.username,
           first_name: `User${lead.user_id}`,
           last_name: '',
           assigned_to_channel: null,
-          chat_id: lead.chat_id, // Guardar chat_id para adicionar ao canal
-          username: lead.username // Guardar username para adicionar ao canal
+          chat_id: lead.chat_id,
+          username: lead.username
         }));
       } else {
         const { data: allLeads } = await leadsQuery;
@@ -86,7 +81,6 @@ export default async function handler(req, res) {
           });
         }
         
-        // Converter para formato esperado
         var leads = allLeads.map(lead => ({
           id: lead.user_id,
           phone: lead.username,
@@ -100,12 +94,10 @@ export default async function handler(req, res) {
       
       console.log(`📊 Total de leads processados: ${leads.length}`);
       
-      // 2. Para cada telefone selecionado, criar canais
       for (let phoneIndex = 0; phoneIndex < selectedPhones.length; phoneIndex++) {
         const phone = selectedPhones[phoneIndex];
         console.log(`📱 Processando telefone ${phoneIndex + 1}/${selectedPhones.length}: ${phone}`);
         
-        // Buscar sessão do telefone
         const { data: sessionData, error: sessionError } = await supabase
           .from('telegram_sessions')
           .select('session_string')
@@ -124,7 +116,6 @@ export default async function handler(req, res) {
           continue;
         }
         
-        // Criar cliente Telegram
         const client = new TelegramClient(
           new StringSession(sessionData.session_string),
           apiId,
@@ -139,9 +130,8 @@ export default async function handler(req, res) {
           console.log(`🔐 Conectando ao Telegram com ${phone}...`);
           await client.connect();
           
-          // Criar canais para este telefone
           const channelsForPhone = [];
-          const channelsToCreate = 3; // Criar 3 canais por telefone
+          const channelsToCreate = 3;
           
           for (let i = 0; i < channelsToCreate; i++) {
             const channelNumber = startNumber + (phoneIndex * channelsToCreate) + i;
@@ -149,7 +139,6 @@ export default async function handler(req, res) {
             
             console.log(`📺 Criando canal "${channelName}" com ${leadsPerChannel} leads...`);
             
-            // Criar canal
             const result = await client.invoke(
               new Api.channels.CreateChannel({
                 title: channelName,
@@ -162,7 +151,6 @@ export default async function handler(req, res) {
             const channel = result.chats[0];
             console.log(`✅ Canal criado: ${channelName} (ID: ${channel.id})`);
             
-            // Adicionar leads ao canal
             let leadsAdded = 0;
             let leadsForThisChannel = leads.slice(
               (phoneIndex * channelsToCreate * leadsPerChannel) + (i * leadsPerChannel),
@@ -171,42 +159,37 @@ export default async function handler(req, res) {
             
             console.log(`👥 Adicionando ${leadsForThisChannel.length} leads ao canal...`);
             
-            // Adicionar leads em batches usando username
             const batchSize = 50;
             for (let j = 0; j < leadsForThisChannel.length; j += batchSize) {
               const batch = leadsForThisChannel.slice(j, j + batchSize);
               
               try {
-                // Usar username diretamente para adicionar os leads ao canal
                 await client.invoke(
                   new Api.channels.InviteToChannel({
                     channel: channel,
                     users: batch.map(lead => {
-                      // Usar username para convidar (Telegram aceita usernames)
                       const username = lead.username;
                       if (username && username.includes('@')) {
                         return {
                           _: 'inputUser',
-                          userId: username, // Usar username diretamente
+                          userId: username,
                           accessHash: '0'
                         };
                       } else {
                         console.log(`⚠️ Username inválido para lead ${lead.username}: ${username}`);
                         return null;
                       }
-                    }).filter(Boolean) // Remover nulos
+                    }).filter(Boolean)
                   })
                 );
                 leadsAdded += batch.length;
                 console.log(`✅ Adicionados ${batch.length} leads (total: ${leadsAdded}/${leadsForThisChannel.length})`);
                 
-                // Delay entre batches
                 if (j + batchSize < leadsForThisChannel.length) {
                   await new Promise(resolve => setTimeout(resolve, 2000));
                 }
               } catch (addError) {
                 console.error(`❌ Erro ao adicionar batch ${j}:`, addError.message);
-                // Tentar adicionar individualmente se batch falhar
                 for (const lead of batch) {
                   try {
                     const username = lead.username;
@@ -216,13 +199,14 @@ export default async function handler(req, res) {
                           channel: channel,
                           users: [{
                             _: 'inputUser',
-                            userId: username, // Usar username diretamente
+                            userId: username,
                             accessHash: '0'
                           }]
                         })
                       );
-                    leadsAdded++;
-                    console.log(`✅ Adicionado lead individual: ${username}`);
+                      leadsAdded++;
+                      console.log(`✅ Adicionado lead individual: ${username}`);
+                    }
                   } catch (individualError) {
                     console.error(`❌ Erro ao adicionar lead ${username}:`, individualError.message);
                   }
@@ -230,7 +214,6 @@ export default async function handler(req, res) {
               }
             }
             
-            // Salvar canal no banco
             const { data: savedChannel, error: saveError } = await supabase
               .from('channels')
               .insert({
@@ -240,7 +223,7 @@ export default async function handler(req, res) {
                 channel_description: channelDescription,
                 creator_phone: phone,
                 selected_phones: [phone],
-                total_members: leadsAdded + 1, // +1 pelo criador
+                total_members: leadsAdded + 1,
                 status: 'members_added',
                 created_by: req.user?.email || 'system'
               })
@@ -265,7 +248,6 @@ export default async function handler(req, res) {
             totalChannelsCreated++;
             totalLeadsAdded += leadsAdded;
             
-            // Delay entre canais
             if (i < channelsToCreate - 1) {
               await new Promise(resolve => setTimeout(resolve, delayBetweenChannels));
             }
@@ -299,7 +281,6 @@ export default async function handler(req, res) {
           }
         }
         
-        // Delay entre telefones
         if (phoneIndex < selectedPhones.length - 1) {
           await new Promise(resolve => setTimeout(resolve, delayBetweenChannels * 2));
         }
