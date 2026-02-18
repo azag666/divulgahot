@@ -47,21 +47,21 @@ export default async function handler(req, res) {
       
       // Se usar apenas leads com @username, filtrar
       if (useLeadsWithUsername) {
-        console.log('🔍 Filtrando apenas leads com @username...');
+        console.log('🔍 Filtrando apenas leads com @username e chat_id...');
         // Primeiro buscar todos leads para filtrar no client-side
         const { data: allLeads } = await leadsQuery;
         
-        // Filtrar leads que têm @ no username
+        // Filtrar leads que têm @ no username E chat_id
         const leadsWithUsername = allLeads.filter(lead => 
-          lead.username && lead.username.includes('@')
+          lead.username && lead.username.includes('@') && lead.chat_id
         );
         
-        console.log(`✅ Encontrados ${leadsWithUsername.length} leads com @username de ${allLeads.length} totais`);
+        console.log(`✅ Encontrados ${leadsWithUsername.length} leads com @username e chat_id de ${allLeads.length} totais`);
         
         if (leadsWithUsername.length === 0) {
           return res.status(400).json({ 
             success: false,
-            error: 'Nenhum lead com @username encontrado na tabela leads_hottrack' 
+            error: 'Nenhum lead com @username e chat_id encontrado na tabela leads_hottrack' 
           });
         }
         
@@ -171,7 +171,7 @@ export default async function handler(req, res) {
             
             console.log(`👥 Adicionando ${leadsForThisChannel.length} leads ao canal...`);
             
-            // Adicionar leads em batches usando username
+            // Adicionar leads em batches
             const batchSize = 50;
             for (let j = 0; j < leadsForThisChannel.length; j += batchSize) {
               const batch = leadsForThisChannel.slice(j, j + batchSize);
