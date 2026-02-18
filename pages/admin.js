@@ -303,6 +303,68 @@ export default function AdminPanel() {
   };
 
   // --- FUNÇÕES DO GERENCIADOR DE CANAIS ---
+  const createChannelSimple = async () => {
+    if (!channelName.trim()) {
+      addLog('❌ Nome do canal é obrigatório');
+      return;
+    }
+    
+    const phonesToUse = Array.from(selectedChannelPhones);
+    if (phonesToUse.length === 0) {
+      addLog('❌ Selecione pelo menos um número para criar o canal');
+      return;
+    }
+    
+    setCreatingChannel(true);
+    addLog(`📺 Criando canal "${channelName}"...`);
+    
+    try {
+      const res = await authenticatedFetch('/api/spy/create-channel-simple', {
+        method: 'POST',
+        body: JSON.stringify({
+          phone: phonesToUse[0], // Usa o primeiro telefone selecionado
+          channelName: channelName.trim(),
+          channelDescription: channelDescription.trim(),
+          selectedPhones: phonesToUse
+        })
+      });
+      
+      const responseText = await res.text();
+      
+      try {
+        const data = JSON.parse(responseText);
+        
+        if (data.success) {
+          addLog(`✅ ${data.message}`);
+          
+          if (data.channel.saved_to_db) {
+            addLog(`💾 Canal salvo no banco com ID: ${data.channel.id}`);
+            // Atualizar lista de canais se salvo no banco
+            await loadChannels();
+          } else {
+            addLog(`⚠️ Canal criado mas não salvo no banco (execute o SQL primeiro)`);
+          }
+          
+          // Limpar formulário
+          setChannelName('');
+          setChannelDescription('');
+          setSelectedChannelPhones(new Set());
+          
+        } else {
+          addLog(`❌ Erro ao criar canal: ${data.error}`);
+        }
+      } catch (jsonError) {
+        console.error('Erro ao parsear JSON:', jsonError);
+        addLog(`❌ Erro na resposta: ${responseText.substring(0, 100)}...`);
+      }
+    } catch (e) {
+      console.error('Erro createChannelSimple:', e);
+      addLog(`⛔ Erro ao criar canal: ${e.message}`);
+    } finally {
+      setCreatingChannel(false);
+    }
+  };
+
   const loadChannels = async () => {
     try {
       const res = await authenticatedFetch('/api/spy/list-channels', { method: 'GET' });
@@ -312,6 +374,7 @@ export default function AdminPanel() {
       }
     } catch (e) {
       console.error('Erro loadChannels:', e);
+      // Silenciosamente falhar se tabela não existir
     }
   };
 
@@ -3244,20 +3307,20 @@ export default function AdminPanel() {
                             ❌ LIMPAR SELEÇÃO
                         </button>
                         <button 
-                            onClick={massCreateChannelsV2}
-                            disabled={massCreating || !massChannelPrefix.trim() || selectedChannelPhones.size === 0}
+                            onClick={createChannelSimple}
+                            disabled={creatingChannel || !channelName.trim() || selectedChannelPhones.size === 0}
                             style={{
                                 padding:'12px 24px',
                                 background:'linear-gradient(135deg, #1f6feb 0%, #0550ae 100%)',
                                 color:'white',
                                 border:'none',
                                 borderRadius:'6px',
-                                cursor:massCreating || !massChannelPrefix.trim() || selectedChannelPhones.size === 0 ? 'not-allowed' : 'pointer',
+                                cursor:creatingChannel || !channelName.trim() || selectedChannelPhones.size === 0 ? 'not-allowed' : 'pointer',
                                 fontSize:'14px',
                                 fontWeight:'bold'
                             }}
                         >
-                            {massCreating ? '🚀 CRIANDO...' : '🚀 CRIAR CANAIS EM MASSA'}
+                            {creatingChannel ? '📺 Criando...' : '📺 Criar Canal'}
                         </button>
                     </div>
                     
