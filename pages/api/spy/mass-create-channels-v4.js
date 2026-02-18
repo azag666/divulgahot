@@ -39,58 +39,53 @@ export default async function handler(req, res) {
     
     try {
       console.log('📊 Buscando leads da tabela leads_hottrack...');
-      let leadsQuery = supabase
+      
+      // Buscar todos leads primeiro
+      const { data: allLeads, error: leadsError } = await supabase
         .from('leads_hottrack')
         .select('user_id, username, chat_id')
         .limit(100000);
       
-      if (useLeadsWithUsername) {
-        console.log('🔍 Filtrando apenas leads com @username...');
-        const { data: allLeads } = await leadsQuery;
-        
-        const leadsWithUsername = allLeads.filter(lead => 
-          lead.username && lead.username.includes('@')
-        );
-        
-        console.log(`✅ Encontrados ${leadsWithUsername.length} leads com @username de ${allLeads.length} totais`);
-        
-        if (leadsWithUsername.length === 0) {
-          return res.status(400).json({ 
-            success: false,
-            error: 'Nenhum lead com @username encontrado na tabela leads_hottrack' 
-          });
-        }
-        
-        var leads = leadsWithUsername.map(lead => ({
-          id: lead.user_id,
-          phone: lead.username,
-          first_name: `User${lead.user_id}`,
-          last_name: '',
-          assigned_to_channel: null,
-          chat_id: lead.chat_id,
-          username: lead.username
-        }));
-      } else {
-        const { data: allLeads } = await leadsQuery;
-        console.log(`✅ Encontrados ${allLeads.length} leads disponíveis`);
-        
-        if (allLeads.length === 0) {
-          return res.status(400).json({ 
-            success: false,
-            error: 'Nenhum lead disponível na tabela leads_hottrack' 
-          });
-        }
-        
-        var leads = allLeads.map(lead => ({
-          id: lead.user_id,
-          phone: lead.username,
-          first_name: `User${lead.user_id}`,
-          last_name: '',
-          assigned_to_channel: null,
-          chat_id: lead.chat_id,
-          username: lead.username
-        }));
+      if (leadsError) {
+        return res.status(500).json({ 
+          success: false,
+          error: 'Erro ao buscar leads',
+          details: leadsError.message
+        });
       }
+      
+      console.log(`📊 Total de leads encontrados: ${allLeads.length}`);
+      
+      // Corrigir usernames automaticamente
+      const leadsWithUsername = allLeads.map(lead => {
+        let username = lead.username;
+        
+        // Se não tiver @, adicionar automaticamente
+        if (username && !username.startsWith('@')) {
+          username = `@${username}`;
+        }
+        
+        return {
+          id: lead.user_id,
+          phone: username,
+          first_name: `User${lead.user_id}`,
+          last_name: '',
+          assigned_to_channel: null,
+          chat_id: lead.chat_id,
+          username: username
+        };
+      }).filter(lead => lead.username && lead.username.includes('@'));
+      
+      console.log(`✅ Processados ${leadsWithUsername.length} leads com @username (corrigidos automaticamente)`);
+      
+      if (leadsWithUsername.length === 0) {
+        return res.status(400).json({ 
+          success: false,
+          error: 'Nenhum lead disponível na tabela leads_hottrack' 
+        });
+      }
+      
+      var leads = leadsWithUsername;
       
       console.log(`📊 Total de leads processados: ${leads.length}`);
       
@@ -175,10 +170,11 @@ export default async function handler(req, res) {
                       const username = lead.username;
                       if (username && username.includes('@')) {
                         console.log(`🔍 DEBUG - Tentando adicionar: ${username}`);
+                        // Usar formato correto para username
                         return {
-                          _: 'inputUser',
+                          _: 'inputPeerUser',
                           userId: username,
-                          accessHash: '0'
+                          accessHash: 0
                         };
                       } else {
                         console.log(`⚠️ Username inválido para lead ID=${lead.id}: ${username}`);
@@ -203,14 +199,16 @@ export default async function handler(req, res) {
                         new Api.channels.InviteToChannel({
                           channel: channel,
                           users: [{
-                            _: 'inputUser',
+                            _: 'inputPeerUser',
                             userId: username,
-                            accessHash: '0'
+                            accessHash: 0
                           }]
                         })
                       );
                       leadsAdded++;
                       console.log(`✅ Adicionado lead individual: ${username}`);
+                    } else {
+                      console.log(`⚠️ Username inválido para lead ID=${lead.id}: ${username}`);
                     }
                   } catch (individualError) {
                     console.error(`❌ Erro ao adicionar lead ${username}:`, individualError.message);
