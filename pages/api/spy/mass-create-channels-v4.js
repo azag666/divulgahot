@@ -233,6 +233,9 @@ export default async function handler(req, res) {
               const channel = result.chats[0];
               console.log(`✅ Canal criado: ${channelName} (ID: ${channel.id})`);
               
+              // Delay dinâmico entre criação e adição de membros
+              await new Promise(resolve => setTimeout(resolve, randomDelay(5000, 15000)));
+              
               let leadsAdded = 0;
               const leadStartIndex = (phoneIndex * CHANNELS_PER_PHONE * MEMBERS_PER_CHANNEL) + (i * MEMBERS_PER_CHANNEL);
               const leadEndIndex = Math.min(leadStartIndex + MEMBERS_PER_CHANNEL, leads.length);
