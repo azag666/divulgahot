@@ -58,11 +58,13 @@ export default async function handler(req, res) {
     const phoneManager = {
       phones: [...selectedPhones],
       unavailable: new Map(), // phone -> {until: timestamp, reason}
+      inFlood: new Set(), // telefones atualmente em flood
       getAvailable: () => {
         const now = Date.now();
         return phoneManager.phones.filter(phone => {
           const unavailable = phoneManager.unavailable.get(phone);
-          return !unavailable || unavailable.until <= now;
+          const inFlood = phoneManager.inFlood.has(phone);
+          return !unavailable && unavailable.until <= now && !inFlood;
         });
       },
       markUnavailable: (phone, reason, delayMinutes = 30) => {
@@ -70,6 +72,7 @@ export default async function handler(req, res) {
           until: Date.now() + (delayMinutes * 60 * 1000),
           reason
         });
+        phoneManager.inFlood.add(phone); // Marcar como em flood
         console.log(`⏰ Telefone ${phone} marcado como indisponível por ${delayMinutes}min - ${reason}`);
       },
       releaseUnavailable: () => {
@@ -77,9 +80,14 @@ export default async function handler(req, res) {
         for (const [phone, info] of phoneManager.unavailable.entries()) {
           if (info.until <= now) {
             phoneManager.unavailable.delete(phone);
+            phoneManager.inFlood.delete(phone); // Liberar do flood
             console.log(`✅ Telefone ${phone} liberado para uso`);
           }
         }
+      },
+      markFlood: (phone, reason) => {
+        phoneManager.inFlood.add(phone);
+        console.log(`🌊 Telefone ${phone} detectado em FLOOD - ${reason}`);
       }
     };
     
@@ -333,15 +341,31 @@ export default async function handler(req, res) {
                   } catch (addError) {
                     console.error(`❌ Erro ao adicionar batch ${j}:`, addError.message);
                     
-                    // Tratar erros de flood
-                    if (addError.message.includes('PEER_FLOOD')) {
-                      stats.peerFlood++;
-                      phoneManager.markUnavailable(phone, 'PEER_FLOOD', 60);
-                      break; // Parar de processar este telefone
-                    } else if (addError.message.includes('FLOOD_WAIT')) {
-                      stats.floodWait++;
-                      phoneManager.markUnavailable(phone, 'FLOOD_WAIT', 30);
-                      break; // Parar de processar este telefone
+                    // DETECÇÃO DE FLOOD - PULAR IMEDIATAMENTE
+                    if (addError.message.includes('PEER_FLOOD') || 
+                        addError.message.includes('FLOOD_WAIT') || 
+                        addError.message.includes('FLOOD_WAIT_X')) {
+                      
+                      console.log(`🌊 FLOOD DETECTADO! Pulando telefone ${phone} imediatamente...`);
+                      phoneManager.markFlood(phone, addError.message);
+                      phoneManager.markUnavailable(phone, 'FLOOD_DETECTED', 60);
+                      
+                      // Marcar leads como processados (parciais)
+                      const processedLeads = leadsForThisChannel.slice(0, leadsAdded);
+                      if (processedLeads.length > 0) {
+                        await supabase
+                          .from('leads_hottrack')
+                          .update({ assigned_to_channel: channel.id.toString() })
+                          .in('user_id', processedLeads.map(lead => lead.id));
+                      }
+                      
+                      return {
+                        phone,
+                        success: false,
+                        error: `FLOOD_DETECTADO: ${addError.message}`,
+                        channels: channelsForPhone,
+                        floodDetected: true
+                      };
                     }
                     
                     // Tentar adicionar individualmente se batch falhar
@@ -360,10 +384,44 @@ export default async function handler(req, res) {
                       } catch (individualError) {
                         stats.totalProcessed++;
                         
+                        // DETECÇÃO DE FLOOD INDIVIDUAL
+                        if (individualError.message.includes('PEER_FLOOD') || 
+                            individualError.message.includes('FLOOD_WAIT') || 
+                            individualError.message.includes('FLOOD_WAIT_X')) {
+                          
+                          console.log(`🌊 FLOOD INDIVIDUAL DETECTADO! Pulando telefone ${phone}...`);
+                          phoneManager.markFlood(phone, individualError.message);
+                          phoneManager.markUnavailable(phone, 'FLOOD_INDIVIDUAL', 60);
+                          
+                          // Marcar leads como processados (parciais)
+                          const processedLeads = leadsForThisChannel.slice(0, leadsAdded);
+                          if (processedLeads.length > 0) {
+                            await supabase
+                              .from('leads_hottrack')
+                              .update({ assigned_to_channel: channel.id.toString() })
+                              .in('user_id', processedLeads.map(lead => lead.id));
+                          }
+                          
+                          return {
+                            phone,
+                            success: false,
+                            error: `FLOOD_INDIVIDUAL: ${individualError.message}`,
+                            channels: channelsForPhone,
+                            floodDetected: true
+                          };
+                        }
+                        
                         // Tratar diferentes tipos de erro
                         if (individualError.message.includes('USER_PRIVACY_RESTRICTED')) {
                           stats.privacyRestricted++;
                           console.log(`⚠️ Lead ${user.id || user.userId} tem privacidade restrita - pulando`);
+                          
+                          // Marcar como bloqueado por privacidade
+                          await supabase
+                            .from('leads_hottrack')
+                            .update({ bloqueado_privacidade: true })
+                            .eq('user_id', user.id || user.userId);
+                            
                         } else if (individualError.message.includes('PEER_ID_INVALID')) {
                           stats.peerIdInvalid++;
                           console.log(`⚠️ Lead ${user.id || user.userId} tem ID inválido - pulando`);
@@ -378,9 +436,9 @@ export default async function handler(req, res) {
                   }
                 }
                 
-                // Delay aleatório entre batches (humanização)
+                // Delay aleatório entre batches (humanização dinâmica)
                 if (j + memberBatchSize < leadsForThisChannel.length) {
-                  await new Promise(resolve => setTimeout(resolve, randomDelay(3000, 7000)));
+                  await new Promise(resolve => setTimeout(resolve, randomDelay(5000, 15000)));
                 }
               }
               
@@ -427,9 +485,9 @@ export default async function handler(req, res) {
               totalChannelsCreated++;
               totalLeadsAdded += leadsAdded;
               
-              // Delay aleatório entre canais (humanização)
+              // Delay aleatório entre canais (humanização dinâmica)
               if (i < CHANNELS_PER_PHONE - 1) {
-                await new Promise(resolve => setTimeout(resolve, randomDelay(5000, 10000)));
+                await new Promise(resolve => setTimeout(resolve, randomDelay(5000, 15000)));
               }
             }
             
@@ -525,18 +583,21 @@ export default async function handler(req, res) {
       }
       
       console.log(`🎉 Criação massiva concluída!`);
-      console.log(`📊 Resumo:`);
+      console.log(`📊 Resumo Final:`);
       console.log(`  - Canais criados: ${totalChannelsCreated}`);
       console.log(`  - Leads adicionados: ${totalLeadsAdded}`);
       console.log(`  - Telefones com falha: ${totalFailed}`);
       console.log(`  - Total de canais: ${allCreatedChannels.length}`);
-      console.log(`📈 Estatísticas detalhadas:`);
+      console.log(`📈 Estatísticas Detalhadas:`);
       console.log(`  - Convites bem-sucedidos: ${stats.successfulInvites}`);
-      console.log(`  - Privacidade restrita: ${stats.privacyRestricted}`);
-      console.log(`  - Peer flood: ${stats.peerFlood}`);
-      console.log(`  - Flood wait: ${stats.floodWait}`);
-      console.log(`  - Peer ID inválido: ${stats.peerIdInvalid}`);
+      console.log(`  - Falhas de privacidade: ${stats.privacyRestricted}`);
+      console.log(`  - Peer flood detectados: ${stats.peerFlood}`);
+      console.log(`  - Flood wait detectados: ${stats.floodWait}`);
+      console.log(`  - Peer ID inválidos: ${stats.peerIdInvalid}`);
       console.log(`  - Usuários banidos: ${stats.userBanned}`);
+      console.log(`  - Total processado: ${stats.totalProcessed}`);
+      console.log(`📊 Telefones em Flood: ${phoneManager.inFlood.size}`);
+      console.log(`📊 Telefones indisponíveis: ${phoneManager.unavailable.size}`);
       
       res.json({
         success: true,
@@ -548,7 +609,13 @@ export default async function handler(req, res) {
           totalFailed,
           totalPhones: selectedPhones.length,
           allCreatedChannels,
-          stats
+          stats,
+          performance: {
+            phonesInFlood: phoneManager.inFlood.size,
+            phonesUnavailable: phoneManager.unavailable.size,
+            averageLeadsPerChannel: Math.round(totalLeadsAdded / totalChannelsCreated),
+            successRate: Math.round((stats.successfulInvites / stats.totalProcessed) * 100)
+          }
         }
       });
       
