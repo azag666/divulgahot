@@ -158,6 +158,10 @@ export default async function handler(req, res) {
             );
             
             console.log(`👥 Adicionando ${leadsForThisChannel.length} leads ao canal...`);
+            console.log('🔍 DEBUG - Leads para este canal:');
+            leadsForThisChannel.slice(0, 5).forEach((lead, idx) => {
+              console.log(`  ${idx + 1}: ID=${lead.id}, Username=${lead.username}, Chat_ID=${lead.chat_id}`);
+            });
             
             const batchSize = 50;
             for (let j = 0; j < leadsForThisChannel.length; j += batchSize) {
