@@ -2,7 +2,7 @@ import { TelegramClient } from 'telegram';
 import { StringSession } from 'telegram/sessions';
 import { Api } from 'telegram/tl';
 import { createClient } from '@supabase/supabase-js';
-import authenticate from '../../../lib/middleware.js';
+const { authenticate } = require('../../../lib/middleware');
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 const apiId = parseInt(process.env.TELEGRAM_API_ID);
@@ -17,13 +17,8 @@ export default async function handler(req, res) {
       channelDescription = 'Canal exclusivo com conteúdo premium',
       leadsPerChannel = 200,
       selectedPhones,
-      startNumber = 1,
-      batchSize = 3,
-      delayBetweenChannels = 5000,
-      useLeadsWithUsername = true
+      startNumber = 1
     } = req.body;
-    
-    console.log(`🚀 DEBUG mass-create-channels-v4: prefix=${channelPrefix}, phones=${selectedPhones?.length}`);
     
     if (!selectedPhones || selectedPhones.length === 0) {
       return res.status(400).json({ success: false, error: 'Selecione pelo menos um telefone' });
@@ -34,51 +29,7 @@ export default async function handler(req, res) {
     let totalLeadsAdded = 0;
     let totalFailed = 0;
     
-    let stats = {
-      privacyRestricted: 0,
-      peerFlood: 0,
-      floodWait: 0,
-      successfulInvites: 0,
-      totalProcessed: 0
-    };
-    
     const randomDelay = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
-    
-    const phoneManager = {
-      phones: [...selectedPhones],
-      unavailable: new Map(),
-      inFlood: new Set(),
-      getAvailable: () => {
-        const now = Date.now();
-        return phoneManager.phones.filter(phone => {
-          const unavailable = phoneManager.unavailable.get(phone);
-          const inFlood = phoneManager.inFlood.has(phone);
-          return !unavailable && unavailable && unavailable.until <= now && !inFlood;
-        });
-      },
-      markUnavailable: (phone, reason, delayMinutes = 30) => {
-        phoneManager.unavailable.set(phone, {
-          until: Date.now() + (delayMinutes * 60 * 1000),
-          reason
-        });
-        phoneManager.inFlood.add(phone);
-        console.log(`⏰ Telefone ${phone} indisponível por ${delayMinutes}min - ${reason}`);
-      },
-      releaseUnavailable: () => {
-        const now = Date.now();
-        for (const [phone, info] of phoneManager.unavailable.entries()) {
-          if (info && info.until <= now) {
-            phoneManager.unavailable.delete(phone);
-            phoneManager.inFlood.delete(phone);
-            console.log(`✅ Telefone ${phone} liberado`);
-          }
-        }
-      },
-      getNextAvailable: () => {
-        const available = phoneManager.getAvailable();
-        return available.length > 0 ? available[0] : null;
-      }
-    };
     
     try {
       const CONCURRENCY_LIMIT = 5;
@@ -87,7 +38,6 @@ export default async function handler(req, res) {
       
       console.log(`🚀 Processamento industrial: ${CONCURRENCY_LIMIT} telefones simultâneos`);
       
-      let allLeads = [];
       const { data: leadsBatch, error: leadsError } = await supabase
         .from('leads_hottrack')
         .select('user_id, username, chat_id')
@@ -99,7 +49,7 @@ export default async function handler(req, res) {
         return res.status(500).json({ success: false, error: 'Erro ao buscar leads' });
       }
       
-      allLeads = leadsBatch.map(lead => {
+      const allLeads = leadsBatch.map(lead => {
         let username = lead.username;
         if (username) {
           username = username.toString().trim();
@@ -116,6 +66,7 @@ export default async function handler(req, res) {
       
       const processPhone = async (phone, phoneIndex) => {
         console.log(`📱 Processando telefone: ${phone}`);
+        const client = null;
         
         try {
           const { data: sessionData } = await supabase
@@ -128,19 +79,19 @@ export default async function handler(req, res) {
             return { phone, success: false, error: 'Sessão não encontrada' };
           }
           
-          const client = new TelegramClient(
+          const telegramClient = new TelegramClient(
             new StringSession(sessionData.session_string),
             apiId, apiHash, { connectionRetries: 3, timeout: 15000 }
           );
           
-          await client.connect();
+          await telegramClient.connect();
           const channelsForPhone = [];
           
           for (let i = 0; i < CHANNELS_PER_PHONE; i++) {
             const channelNumber = startNumber + (phoneIndex * CHANNELS_PER_PHONE) + i;
             const channelName = `${channelPrefix} ${channelNumber}`;
             
-            const result = await client.invoke(
+            const result = await telegramClient.invoke(
               new Api.channels.CreateChannel({
                 title: channelName,
                 about: channelDescription,
@@ -160,10 +111,10 @@ export default async function handler(req, res) {
             
             for (const lead of leadsForThisChannel) {
               try {
-                const entity = await client.getEntity(lead.username);
-                const inputPeer = await client.getInputEntity(entity);
+                const entity = await telegramClient.getEntity(lead.username);
+                const inputPeer = await telegramClient.getInputEntity(entity);
                 
-                await client.invoke(
+                await telegramClient.invoke(
                   new Api.channels.InviteToChannel({
                     channel: channel,
                     users: [inputPeer]
@@ -171,35 +122,33 @@ export default async function handler(req, res) {
                 );
                 
                 leadsAdded++;
-                stats.successfulInvites++;
                 console.log(`✅ Lead adicionado: ${lead.username}`);
                 
-                const inviteDelay = randomDelay(4000, 10000);
+                await supabase
+                  .from('leads_hottrack')
+                  .update({ assigned_to_channel: channel.id.toString() })
+                  .eq('user_id', lead.id);
+                
+                const inviteDelay = randomDelay(2000, 5000);
                 await new Promise(resolve => setTimeout(resolve, inviteDelay));
                 
               } catch (error) {
-                stats.totalProcessed++;
-                
                 if (error.message.includes('FLOOD_WAIT') || error.message.includes('PEER_FLOOD')) {
-                  console.log(`🌊 FLOOD detectado: ${phone}`);
-                  phoneManager.markUnavailable(phone, 'FLOOD', 60);
+                  console.log(`🌊 FLOOD detectado: ${phone} - pulando para próximo chip`);
                   
-                  await supabase
-                    .from('leads_hottrack')
-                    .update({ assigned_to_channel: channel.id.toString() })
-                    .eq('user_id', lead.id);
+                  try {
+                    await telegramClient.disconnect();
+                  } catch (e) {}
                   
-                  await client.disconnect();
                   return { phone, success: false, error: 'FLOOD', rotated: true };
                 }
                 
                 if (error.message.includes('USER_PRIVACY_RESTRICTED')) {
-                  stats.privacyRestricted++;
                   console.log(`⚠️ Privacidade restrita: ${lead.username}`);
                   
                   await supabase
                     .from('leads_hottrack')
-                    .update({ bloqueado_privacidade: true })
+                    .update({ status: 'privado' })
                     .eq('user_id', lead.id);
                 }
               }
@@ -224,32 +173,35 @@ export default async function handler(req, res) {
             totalLeadsAdded += leadsAdded;
           }
           
-          await client.disconnect();
+          await telegramClient.disconnect();
           return { phone, success: true, channels: channelsForPhone };
           
         } catch (error) {
           console.error(`❌ Erro telefone ${phone}:`, error.message);
+          
+          try {
+            if (client) await client.disconnect();
+          } catch (e) {}
+          
           return { phone, success: false, error: error.message };
         }
       };
       
+      const processBatch = async (phones) => {
+        const promises = phones.map(phone => {
+          const index = selectedPhones.indexOf(phone);
+          return processPhone(phone, index);
+        });
+        
+        return await Promise.allSettled(promises);
+      };
+      
       let processedCount = 0;
       while (processedCount < selectedPhones.length) {
-        phoneManager.releaseUnavailable();
-        const availablePhones = phoneManager.getAvailable();
-        
-        if (availablePhones.length === 0) {
-          console.log(`⏳ Aguardando telefones disponíveis...`);
-          await new Promise(resolve => setTimeout(resolve, 30000));
-          continue;
-        }
-        
-        const batch = availablePhones.slice(0, CONCURRENCY_LIMIT);
+        const batch = selectedPhones.slice(processedCount, processedCount + CONCURRENCY_LIMIT);
         console.log(`🚀 Processando batch: ${batch.join(', ')}`);
         
-        const batchResults = await Promise.allSettled(
-          batch.map(phone => processPhone(phone, selectedPhones.indexOf(phone)))
-        );
+        const batchResults = await processBatch(batch);
         
         batchResults.forEach(result => {
           if (result.status === 'fulfilled') {
@@ -261,8 +213,11 @@ export default async function handler(req, res) {
         });
         
         processedCount += batch.length;
-        const batchDelay = randomDelay(10000, 15000);
-        await new Promise(resolve => setTimeout(resolve, batchDelay));
+        
+        if (processedCount < selectedPhones.length) {
+          const batchDelay = randomDelay(10000, 15000);
+          await new Promise(resolve => setTimeout(resolve, batchDelay));
+        }
       }
       
       console.log(`🎉 Processamento concluído!`);
@@ -275,8 +230,7 @@ export default async function handler(req, res) {
         summary: {
           totalChannelsCreated,
           totalLeadsAdded,
-          totalFailed,
-          stats
+          totalFailed
         }
       });
       
