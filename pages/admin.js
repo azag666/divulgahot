@@ -1,12 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
-  RocketLaunchIcon, UserGroupIcon, EyeIcon, InboxArrowDownIcon, 
-  TvIcon, ShieldExclamationIcon, WrenchScrewdriverIcon, 
-  PlayIcon, StopIcon, TrashIcon, ArrowPathIcon, 
+  RocketLaunchIcon, UserGroupIcon, EyeIcon, InboxArrowDownIcon,
+  TvIcon, WrenchScrewdriverIcon,
+  PlayIcon, StopIcon, TrashIcon, ArrowPathIcon,
   ChatBubbleLeftRightIcon, LockClosedIcon, ChartBarIcon, DocumentDuplicateIcon,
-  CheckCircleIcon, XCircleIcon, PaperAirplaneIcon, PlusCircleIcon, DocumentCheckIcon,
-  ShieldCheckIcon
+  CheckCircleIcon, XCircleIcon, PaperAirplaneIcon, PlusCircleIcon, DocumentCheckIcon
 } from '@heroicons/react/24/outline';
 
 // --- COMPONENTES DE UI REUTILIZÁVEIS (DESIGN SYSTEM FINTECH) ---
@@ -140,12 +139,6 @@ export default function AdminPanel() {
   const [channelMediaUrl, setChannelMediaUrl] = useState('');
   const [selectedChannelPhones, setSelectedChannelPhones] = useState(new Set());
   const [selectedChannelsForBroadcast, setSelectedChannelsForBroadcast] = useState(new Set());
-  
-  // --- ESTADOS DE DENÚNCIAS ---
-  const [massReporting, setMassReporting] = useState(false);
-  const [targetBotUsername, setTargetBotUsername] = useState('');
-  const [reportReason, setReportReason] = useState('spam');
-  const [selectedReportPhones, setSelectedReportPhones] = useState(new Set());
   
   // --- ESTADOS DE CRIAÇÃO MASSIVA ---
   const [massCreating, setMassCreating] = useState(false);
@@ -586,26 +579,6 @@ export default function AdminPanel() {
     finally { setBroadcastingChannel(false); }
   };
 
-  const massReportBot = async () => {
-    if (!targetBotUsername.trim()) return addLog('[ERRO] Alvo obrigatório');
-    const phonesToUse = Array.from(selectedReportPhones);
-    if (phonesToUse.length === 0) return addLog('[ERRO] Selecione números');
-    
-    setMassReporting(true);
-    addLog(`[SISTEMA] Iniciando denúncias contra @${targetBotUsername}`);
-    try {
-      const res = await authenticatedFetch('/api/spy/mass-report-bot', {
-        method: 'POST', body: JSON.stringify({ targetBotUsername: targetBotUsername.trim(), selectedPhones: phonesToUse, reportReason: reportReason, batchSize: 3, delayBetweenReports: 5000 })
-      });
-      const data = await res.json();
-      if (data.success) {
-        addLog(`[SUCESSO] Denúncias concluídas. Total: ${data.summary.totalReportsSent}`);
-        setTargetBotUsername(''); setSelectedReportPhones(new Set());
-      } else addLog(`[ERRO] ${data.error}`);
-    } catch (e) { addLog(`[ERRO] ${e.message}`); }
-    finally { setMassReporting(false); }
-  };
-
   const createChannelSimple = async () => {
     if (!channelName.trim()) return addLog('[ERRO] Nome obrigatório');
     const phonesToUse = Array.from(selectedChannelPhones);
@@ -1038,7 +1011,6 @@ export default function AdminPanel() {
                 { id: 'spy', label: 'Scanner', icon: EyeIcon },
                 { id: 'inbox', label: 'Inbox', icon: InboxArrowDownIcon },
                 { id: 'channels', label: 'Canais', icon: TvIcon },
-                { id: 'reports', label: 'Denúncias', icon: ShieldExclamationIcon },
                 { id: 'tools', label: 'Ferramentas', icon: WrenchScrewdriverIcon }
             ].map(item => (
                 <motion.button 
@@ -1354,28 +1326,6 @@ export default function AdminPanel() {
                                 ))}
                             </div>
                         </div>
-                    </Card>
-                )}
-
-                {/* ABA DENÚNCIAS */}
-                {tab === 'reports' && (
-                    <Card>
-                        <h3 style={{ margin: '0 0 24px 0', fontSize: '14px', fontWeight: '500', color: '#EDEDED' }}>Protocolo de Contenção (Denúncias)</h3>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '24px' }}>
-                            <Input placeholder="Namespace alvo (@bot)" value={targetBotUsername} onChange={e=>setTargetBotUsername(e.target.value)} />
-                            <Select value={reportReason} onChange={e=>setReportReason(e.target.value)}>
-                                <option value="spam">Flag: Spamming Behavior</option>
-                                <option value="fake">Flag: Impersonation</option>
-                                <option value="violence">Flag: Violência</option>
-                                <option value="other">Flag: Desconhecida</option>
-                            </select>
-                        </div>
-                        <div style={{ display: 'flex', gap: '16px', marginBottom: '24px' }}>
-                            <Button variant="secondary" onClick={() => setSelectedReportPhones(new Set(sessions.filter(s=>s.is_active).map(s=>s.phone_number)))}>Armar Sessões ({selectedReportPhones.size})</Button>
-                        </div>
-                        <Button variant="danger" icon={ShieldCheckIcon} onClick={massReportBot} disabled={massReporting || !targetBotUsername} style={{ width: '250px' }}>
-                            EXECUTAR CONTENÇÃO
-                        </Button>
                     </Card>
                 )}
 
