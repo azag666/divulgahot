@@ -5,7 +5,8 @@ import {
   TvIcon, WrenchScrewdriverIcon,
   PlayIcon, StopIcon, TrashIcon, ArrowPathIcon,
   ChatBubbleLeftRightIcon, LockClosedIcon, ChartBarIcon, DocumentDuplicateIcon,
-  CheckCircleIcon, XCircleIcon, PaperAirplaneIcon, PlusCircleIcon, DocumentCheckIcon
+  CheckCircleIcon, XCircleIcon, PaperAirplaneIcon, PlusCircleIcon, DocumentCheckIcon,
+  DocumentPlusIcon
 } from '@heroicons/react/24/outline';
 
 // --- COMPONENTES DE UI REUTILIZÁVEIS (DESIGN SYSTEM FINTECH) ---
@@ -67,6 +68,90 @@ const Button = ({ children, variant = 'primary', icon: Icon, loading, ...props }
         </motion.button>
     );
 };
+
+const NAV_ITEMS = [
+    { id: 'dashboard', label: 'CRM', icon: RocketLaunchIcon },
+    { id: 'groups', label: 'Grupos', icon: UserGroupIcon },
+    { id: 'spy', label: 'Scanner', icon: EyeIcon },
+    { id: 'inbox', label: 'Inbox', icon: InboxArrowDownIcon },
+    { id: 'channels', label: 'Canais', icon: TvIcon },
+    { id: 'tools', label: 'Ferramentas', icon: WrenchScrewdriverIcon }
+];
+
+const Sidebar = ({ tab, setTab, isAdmin, onLogout }) => (
+    <div style={{
+        position: 'fixed', top: 0, left: 0, width: '240px', height: '100vh',
+        background: '#050505', borderRight: '1px solid #1F1F1F',
+        display: 'flex', flexDirection: 'column', padding: '24px 16px', zIndex: 10
+    }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '0 8px', marginBottom: '32px' }}>
+            <motion.div
+                animate={{ rotate: [0, 8, -8, 0] }}
+                transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
+                style={{ width: '28px', height: '28px', borderRadius: '8px', background: 'linear-gradient(135deg, #EDEDED, #8B949E)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
+            >
+                <RocketLaunchIcon style={{ width: 16, height: 16, color: '#000' }} />
+            </motion.div>
+            <div>
+                <div style={{ fontSize: '14px', fontWeight: 600, color: '#FFF', letterSpacing: '-0.3px' }}>HOTTRACK</div>
+                <div style={{ fontSize: '11px', color: '#8B949E' }}>Workspace</div>
+            </div>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1, overflowY: 'auto' }}>
+            {NAV_ITEMS.map(item => {
+                const active = tab === item.id;
+                return (
+                    <motion.button
+                        key={item.id}
+                        onClick={() => setTab(item.id)}
+                        whileHover={!active ? { x: 2 } : {}}
+                        whileTap={{ scale: 0.98 }}
+                        style={{
+                            position: 'relative', display: 'flex', alignItems: 'center', gap: '12px',
+                            padding: '10px 12px', borderRadius: '8px', border: 'none', background: 'transparent',
+                            cursor: 'pointer', width: '100%', textAlign: 'left',
+                            color: active ? '#FFF' : '#8B949E', fontSize: '13px', fontWeight: '500'
+                        }}
+                    >
+                        {active && (
+                            <motion.div
+                                layoutId="sidebar-active-pill"
+                                transition={{ type: 'spring', stiffness: 500, damping: 40 }}
+                                style={{ position: 'absolute', inset: 0, background: '#141414', border: '1px solid #1F1F1F', borderRadius: '8px' }}
+                            />
+                        )}
+                        <motion.div
+                            style={{ position: 'relative', zIndex: 1, display: 'flex' }}
+                            animate={active ? { scale: 1.1 } : { scale: 1 }}
+                            whileHover={{ scale: 1.15, rotate: -6 }}
+                            transition={{ type: 'spring', stiffness: 400, damping: 15 }}
+                        >
+                            <item.icon style={{ width: 18, height: 18 }} />
+                        </motion.div>
+                        <span style={{ position: 'relative', zIndex: 1 }}>{item.label}</span>
+                    </motion.button>
+                );
+            })}
+        </div>
+
+        <div style={{ borderTop: '1px solid #1F1F1F', paddingTop: '16px', display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '12px', color: '#8B949E' }}>
+            {isAdmin && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#EDEDED' }}>
+                    <LockClosedIcon style={{ width: 12 }} /> ADMIN
+                </div>
+            )}
+            <div>v6.0.5</div>
+            <motion.button
+                onClick={onLogout}
+                whileHover={{ x: 2 }}
+                style={{ background: 'none', border: 'none', padding: 0, color: '#FF453A', cursor: 'pointer', fontSize: '12px', textAlign: 'left' }}
+            >
+                Encerrar sessão
+            </motion.button>
+        </div>
+    </div>
+);
 
 export default function AdminPanel() {
   // --- ESTADOS DE AUTENTICAÇÃO ---
@@ -968,8 +1053,10 @@ export default function AdminPanel() {
   );
 
   return (
-    <div style={{ backgroundColor: '#000000', color: '#EDEDED', minHeight: '100vh', padding: '32px', fontFamily: 'Inter, -apple-system, sans-serif' }}>
-        
+    <div style={{ backgroundColor: '#000000', color: '#EDEDED', minHeight: '100vh', fontFamily: 'Inter, -apple-system, sans-serif' }}>
+
+        <Sidebar tab={tab} setTab={setTab} isAdmin={isAdmin} onLogout={handleLogout} />
+
         {/* MODAL DE CHAT */}
         {viewingChat && (
             <div style={{position:'fixed', top:0, left:0, width:'100%', height:'100%', background:'rgba(0,0,0,0.9)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center'}}>
@@ -999,46 +1086,21 @@ export default function AdminPanel() {
             </div>
         )}
 
-        {/* NAVEGAÇÃO SUPERIOR */}
-        <div style={{ marginBottom: '32px', display: 'flex', gap: '8px', borderBottom: '1px solid #1F1F1F', paddingBottom: '24px', alignItems: 'center', flexWrap: 'wrap' }}>
-            <h2 style={{ margin:0, marginRight:'32px', color:'#FFF', fontSize: '16px', fontWeight: '600', letterSpacing: '-0.5px' }}>
-                HOTTRACK <span style={{color: '#8B949E', fontWeight: '400'}}>Workspace</span>
-            </h2>
+        <div style={{ marginLeft: '240px', padding: '32px 40px', minHeight: '100vh' }}>
 
-            {[
-                { id: 'dashboard', label: 'CRM', icon: RocketLaunchIcon },
-                { id: 'groups', label: 'Grupos', icon: UserGroupIcon },
-                { id: 'spy', label: 'Scanner', icon: EyeIcon },
-                { id: 'inbox', label: 'Inbox', icon: InboxArrowDownIcon },
-                { id: 'channels', label: 'Canais', icon: TvIcon },
-                { id: 'tools', label: 'Ferramentas', icon: WrenchScrewdriverIcon }
-            ].map(item => (
-                <motion.button 
-                    key={item.id}
-                    whileHover={{ background: 'rgba(255,255,255,0.04)' }}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={() => setTab(item.id)} 
-                    style={{
-                        display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 14px', 
-                        background: tab === item.id ? '#141414' : 'transparent', 
-                        color: tab === item.id ? '#FFF' : '#8B949E', 
-                        border: `1px solid ${tab === item.id ? '#1F1F1F' : 'transparent'}`, 
-                        borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: '500',
-                        transition: 'color 0.2s'
-                    }}
+        {/* CABEÇALHO DA PÁGINA */}
+        <div style={{ marginBottom: '32px', paddingBottom: '24px', borderBottom: '1px solid #1F1F1F' }}>
+            <AnimatePresence mode="wait">
+                <motion.h1
+                    key={tab}
+                    initial={{ opacity: 0, x: -8 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ duration: 0.2 }}
+                    style={{ margin: 0, color: '#FFF', fontSize: '20px', fontWeight: '600', letterSpacing: '-0.5px' }}
                 >
-                    <motion.div animate={tab === item.id ? { y: [0, -2, 0] } : {}} transition={{ repeat: Infinity, duration: 2, ease: "easeInOut" }}>
-                        <item.icon style={{ width: 14, height: 14 }} />
-                    </motion.div>
-                    {item.label}
-                </motion.button>
-            ))}
-
-            <div style={{ marginLeft:'auto', fontSize:'12px', color:'#8b949e', display:'flex', alignItems:'center', gap:'16px' }}>
-                {isAdmin && <span style={{ color:'#EDEDED', display:'flex', alignItems:'center', gap:'4px' }}><LockClosedIcon style={{width: 12}}/> ADMIN</span>}
-                <span>v6.0.5</span>
-                <span onClick={handleLogout} style={{cursor:'pointer', color:'#FF453A'}}>Encerrar</span>
-            </div>
+                    {NAV_ITEMS.find(item => item.id === tab)?.label || 'Painel'}
+                </motion.h1>
+            </AnimatePresence>
         </div>
 
         <AnimatePresence mode="wait">
@@ -1365,6 +1427,7 @@ export default function AdminPanel() {
                 
             </motion.div>
         </AnimatePresence>
+        </div>
     </div>
   );
 }
